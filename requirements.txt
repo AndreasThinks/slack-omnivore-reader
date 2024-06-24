@@ -1,0 +1,6 @@
+slack_bolt
+requests
+slack_bolt
+fastapi
+uvicorn
+httpx
