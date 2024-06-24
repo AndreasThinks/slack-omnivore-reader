@@ -216,22 +216,24 @@ async def capture_all_events(event):
 # Then, in your slack_events function:
 @fastapi_app.post("/slack/events")
 async def slack_events(req: Request):
-    if limiter.hit(rate_limits):
-        try:
-            body = await req.json()
-            logger.info(f"Received Slack event: {escape_user_input(json.dumps(body, indent=2))}")
-            
-            # Handle URL verification
-            if body.get("type") == "url_verification":
-                return {"challenge": body["challenge"]}
-            
-            return await handler.handle(req)
-        except Exception as e:
-            logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
-    else:
-        logger.warning("Rate limit exceeded")
-        raise HTTPException(status_code=429, detail="Too many requests")
+    try:
+        # Check rate limits
+        for rate_limit in rate_limits:
+            if not limiter.hit(rate_limit, "global", *req.client.host):
+                logger.warning("Rate limit exceeded")
+                raise HTTPException(status_code=429, detail="Too many requests")
+        
+        body = await req.json()
+        logger.info(f"Received Slack event: {escape_user_input(json.dumps(body, indent=2))}")
+        
+        # Handle URL verification
+        if body.get("type") == "url_verification":
+            return {"challenge": body["challenge"]}
+        
+        return await handler.handle(req)
+    except Exception as e:
+        logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
 
 @fastapi_app.get("/")
 async def health_check():
