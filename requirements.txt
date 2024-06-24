@@ -5,3 +5,5 @@ fastapi
 uvicorn
 httpx
 aiohttp
+limits
+python-dotenv

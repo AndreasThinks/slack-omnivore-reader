@@ -3,11 +3,24 @@ import json
 import httpx
 import uuid
 import logging
+import html
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from collections import deque
 import re
+from urllib.parse import urlparse
+from limits import RateLimitItem
+from limits.storage import MemoryStorage
+from limits.strategies import MovingWindowRateLimiter
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -23,24 +36,35 @@ app = AsyncApp(
 fastapi_app = FastAPI()
 handler = AsyncSlackRequestHandler(app)
 
-# Omnivore API endpoint
+# Add secure HTTP headers
+fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+fastapi_app.add_middleware(HTTPSRedirectMiddleware)
+
+# Set up rate limiting
+RATE_LIMIT = "100 per minute"
+limiter = MovingWindowRateLimiter(MemoryStorage())
+rate_limit_item = RateLimitItem(RATE_LIMIT)
+
 OMNIVORE_API_URL = "https://api-prod.omnivore.app/api/graphql"
 OMNIVORE_API_KEY = os.environ["OMNIVORE_API_KEY"]
 
-
-# At the top of your file, add this line to get the label from an environment variable
+# Get the label from an environment variable
 OMNIVORE_LABEL = os.environ.get("OMNIVORE_LABEL", "slack-import")
+
 # Store recent events for debugging
 recent_events = deque(maxlen=10)
 
+def escape_user_input(input_string):
+    return html.escape(input_string)
+
 @app.event("reaction_added")
 async def handle_reaction(event, say, client):
-    logger.info(f"Received reaction_added event: {json.dumps(event, indent=2)}")
+    logger.info(f"Received reaction_added event: {escape_user_input(json.dumps(event, indent=2))}")
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
     
     try:
-        logger.info(f"Fetching message from channel {channel_id} with timestamp {message_ts}")
+        logger.info(f"Fetching message from channel {escape_user_input(channel_id)} with timestamp {escape_user_input(message_ts)}")
         result = await client.conversations_history(
             channel=channel_id,
             latest=message_ts,
@@ -49,20 +73,20 @@ async def handle_reaction(event, say, client):
         )
         
         result_data = result.data
-        logger.info(f"Conversation history result: {json.dumps(result_data, indent=2)}")
+        logger.info(f"Conversation history result: {escape_user_input(json.dumps(result_data, indent=2))}")
         
         if result_data["messages"]:
             message = result_data["messages"][0]
-            logger.info(f"Retrieved message: {json.dumps(message, indent=2)}")
-            url = extract_url_from_message(message)
+            logger.info(f"Retrieved message: {escape_user_input(json.dumps(message, indent=2))}")
+            url = extract_and_validate_url(message)
             
             if url:
-                logger.info(f"URL extracted: {url}")
+                logger.info(f"URL extracted: {escape_user_input(url)}")
                 result = await save_to_omnivore(url)
                 if result and "data" in result and "saveUrl" in result["data"]:
                     saved_url = result["data"]["saveUrl"].get("url")
                     if saved_url:
-                        reply_text = f"Saved URL to Omnivore with label '{OMNIVORE_LABEL}': {saved_url}"
+                        reply_text = f"Saved URL to Omnivore with label '{escape_user_input(OMNIVORE_LABEL)}': {escape_user_input(saved_url)}"
                         # Send the reply as a thread to the original message
                         await client.chat_postMessage(
                             channel=channel_id,
@@ -79,6 +103,28 @@ async def handle_reaction(event, say, client):
             logger.warning("No message found in the conversation history")
     except Exception as e:
         logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
+
+
+def is_valid_url(url):
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
+def sanitize_url(url):
+    # Remove any whitespace and quotes
+    sanitized = url.strip().strip('"\'')
+    # Ensure the URL starts with http:// or https://
+    if not sanitized.startswith(('http://', 'https://')):
+        sanitized = 'http://' + sanitized
+    return sanitized
+
+def extract_and_validate_url(message):
+    url = extract_url_from_message(message)
+    if url and is_valid_url(url):
+        return sanitize_url(url)
+    return None
 
 def extract_url_from_message(message):
     # Check for URLs in the main text
@@ -163,18 +209,22 @@ async def capture_all_events(event):
 
 @fastapi_app.post("/slack/events")
 async def slack_events(req: Request):
-    try:
-        body = await req.json()
-        logger.info(f"Received Slack event: {json.dumps(body, indent=2)}")
-        
-        # Handle URL verification
-        if body.get("type") == "url_verification":
-            return {"challenge": body["challenge"]}
-        
-        return await handler.handle(req)
-    except Exception as e:
-        logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
-        return {"error": "An error occurred processing the Slack event"}
+    if limiter.hit(rate_limit_item):
+        try:
+            body = await req.json()
+            logger.info(f"Received Slack event: {escape_user_input(json.dumps(body, indent=2))}")
+            
+            # Handle URL verification
+            if body.get("type") == "url_verification":
+                return {"challenge": body["challenge"]}
+            
+            return await handler.handle(req)
+        except Exception as e:
+            logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
+    else:
+        logger.warning("Rate limit exceeded")
+        raise HTTPException(status_code=429, detail="Too many requests")
 
 @fastapi_app.get("/")
 async def health_check():
@@ -183,7 +233,7 @@ async def health_check():
 
 @fastapi_app.get("/debug/recent-events")
 async def get_recent_events():
-    return {"recent_events": list(recent_events)}
+    return {"recent_events": [escape_user_input(json.dumps(event)) for event in list(recent_events)]}
 
 @fastapi_app.get("/test-slack-app")
 async def test_slack_app():
@@ -199,6 +249,15 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     logger.info(f"Response status: {response.status_code}")
     return response
+
+# Error handling middleware
+@fastapi_app.middleware("http")
+async def errors_handling(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.error(f"An error occurred: {str(exc)}", exc_info=True)
+        return JSONResponse(status_code=500, content={"message": "An internal error occurred"})
 
 if __name__ == "__main__":
     import uvicorn
