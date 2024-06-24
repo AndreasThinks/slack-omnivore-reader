@@ -63,24 +63,18 @@ async def handle_reaction(event, say, client):
                     saved_url = result["data"]["saveUrl"].get("url")
                     if saved_url:
                         reply_text = f"Saved URL to Omnivore with label '{OMNIVORE_LABEL}': {saved_url}"
+                        # Send the reply as a thread to the original message
+                        await client.chat_postMessage(
+                            channel=channel_id,
+                            text=reply_text,
+                            thread_ts=message_ts
+                        )
                     else:
-                        reply_text = f"Attempted to save URL to Omnivore, but encountered an issue."
+                        logger.warning("Attempted to save URL to Omnivore, but encountered an issue.")
                 else:
-                    reply_text = f"Failed to save URL to Omnivore. Please check the logs for more information."
-                
-                # Send the reply as a thread to the original message
-                await client.chat_postMessage(
-                    channel=channel_id,
-                    text=reply_text,
-                    thread_ts=message_ts
-                )
+                    logger.error("Failed to save URL to Omnivore. Please check the logs for more information.")
             else:
-                logger.warning("No URL found in the message")
-                await client.chat_postMessage(
-                    channel=channel_id,
-                    text="No URL found in the message to save to Omnivore.",
-                    thread_ts=message_ts
-                )
+                logger.info("No URL found in the message. Remaining silent.")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
