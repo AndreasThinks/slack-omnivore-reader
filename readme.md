@@ -20,15 +20,17 @@ Click the "Deploy to Heroku" button above to start the deployment process. Don't
 - `OMNIVORE_LABEL`: (Optional) Label to apply to saved articles in Omnivore
 - `RATE_LIMIT_PER_MINUTE`: (Optional) Number of requests allowed per minute
 
-## Instalation
+## Installation
 To add the application to Slack, you *must* have deployed the back-end on Heroku using the process above.
 
-Once this is complete, you can:
-- Create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions).
+Once this is complete, you can create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions). You can either use our [Slack Manifest](manifest.json), or follow the manual steps below.
+
 - In the "oAuth & Permissions" section, enable **channels:history**, **chat:write** and **reactions:read**, and obtain your SLACK_BOT_TOKEN.
-- In the "Event Subscriptions" section
-  - Add "reaction_added" to bot events
-  - Add your full Heroku application URL (in the format https://your-heroku-app.herokuapp.com/slack/events) as the request URL. 
+- In the "Event Subscriptions" section, add "reaction_added" to bot events
+
+Once your bot has been installed, follow the configuration steps below.
+
+- In the "Event Subscriptions" section, add your full Heroku application URL (in the format https://your-heroku-app.herokuapp.com/slack/events) as the request URL. 
 - If you do not already have one, create an [Omnivore](https://omnivore.app/) account, and [get an API key](https://omnivore.app/settings/api).
 - From the Heroku web-interface, add all environment variables to your application.
 - From within your Slack client, add your bot to a channel by sending them a DM
