@@ -87,6 +87,9 @@ async def handle_reaction(event, say, client):
                 result = await save_to_omnivore(url)
                 if result and "data" in result and isinstance(result["data"], dict) and "saveUrl" in result["data"]:
                     saved_url = result["data"]["saveUrl"].get("url")
+                    # TODO improve this horrible bug handling
+                    if saved_url and '>' in saved_url[-3:]:
+                        saved_url = saved_url[:-3] + saved_url[-3:].replace('>', '')
                     if saved_url:
                         reply_text = f"Saved URL to Omnivore with label '{escape_user_input(OMNIVORE_LABEL)}': {escape_user_input(saved_url)}"
                         await client.chat_postMessage(
