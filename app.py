@@ -36,7 +36,7 @@ async def handle_reaction(event, say, client):
     message_ts = event["item"]["ts"]
     
     try:
-        # Fetch the message that was reacted to
+        logger.info(f"Fetching message from channel {channel_id} with timestamp {message_ts}")
         result = await client.conversations_history(
             channel=channel_id,
             latest=message_ts,
@@ -44,15 +44,21 @@ async def handle_reaction(event, say, client):
             inclusive=True
         )
         
-        message = result["messages"][0]
-        url = extract_url_from_message(message)
+        logger.info(f"Conversation history result: {json.dumps(result, indent=2)}")
         
-        if url:
-            logger.info(f"URL extracted: {url}")
-            await save_to_omnivore(url)
-            await say(f"Saved URL to Omnivore: {url}")
+        if result["messages"]:
+            message = result["messages"][0]
+            logger.info(f"Retrieved message: {json.dumps(message, indent=2)}")
+            url = extract_url_from_message(message)
+            
+            if url:
+                logger.info(f"URL extracted: {url}")
+                await save_to_omnivore(url)
+                await say(f"Saved URL to Omnivore: {url}")
+            else:
+                logger.warning("No URL found in the message")
         else:
-            logger.warning("No URL found in the message")
+            logger.warning("No message found in the conversation history")
     except Exception as e:
         logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
 
