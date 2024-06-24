@@ -45,10 +45,12 @@ async def handle_reaction(event, say, client):
             inclusive=True
         )
         
-        logger.info(f"Conversation history result: {json.dumps(result, indent=2)}")
+        # Extract the data from AsyncSlackResponse
+        result_data = result.data
+        logger.info(f"Conversation history result: {json.dumps(result_data, indent=2)}")
         
-        if result["messages"]:
-            message = result["messages"][0]
+        if result_data["messages"]:
+            message = result_data["messages"][0]
             logger.info(f"Retrieved message: {json.dumps(message, indent=2)}")
             url = extract_url_from_message(message)
             
@@ -77,6 +79,15 @@ def extract_url_from_message(message):
         attachment_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', attachment_text)
         if attachment_urls:
             return attachment_urls[0]
+    
+    # Check for URLs in blocks (for messages with rich layouts)
+    blocks = message.get("blocks", [])
+    for block in blocks:
+        if block["type"] == "section":
+            text = block.get("text", {}).get("text", "")
+            block_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+            if block_urls:
+                return block_urls[0]
     
     return None
 
