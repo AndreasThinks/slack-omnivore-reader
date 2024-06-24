@@ -1,10 +1,12 @@
 import os
+import json
 import httpx
 import uuid
 import logging
 from slack_bolt.async_app import AsyncApp
-from slack_bolt.adapter.fastapi import SlackRequestHandler
+from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from fastapi import FastAPI, Request
+from collections import deque
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -18,15 +20,18 @@ app = AsyncApp(
 
 # Initialize FastAPI app
 fastapi_app = FastAPI()
-handler = SlackRequestHandler(app)
+handler = AsyncSlackRequestHandler(app)
 
 # Omnivore API endpoint
 OMNIVORE_API_URL = "https://api-prod.omnivore.app/api/graphql"
 OMNIVORE_API_KEY = os.environ["OMNIVORE_API_KEY"]
 
+# Store recent events for debugging
+recent_events = deque(maxlen=10)
+
 @app.event("reaction_added")
 async def handle_reaction(event, say, client):
-    logger.info(f"Reaction added event received: {event}")
+    logger.info(f"Received reaction_added event: {json.dumps(event, indent=2)}")
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
     
@@ -86,19 +91,40 @@ async def save_to_omnivore(url):
     except Exception as e:
         logger.error(f"An error occurred while saving to Omnivore: {str(e)}", exc_info=True)
 
+@app.event("*")
+async def capture_all_events(event):
+    recent_events.appendleft(event)
+
 @fastapi_app.post("/slack/events")
 async def slack_events(req: Request):
-    logger.info("Received Slack event")
     try:
+        body = await req.json()
+        logger.info(f"Received Slack event: {json.dumps(body, indent=2)}")
+        
+        # Handle URL verification
+        if body.get("type") == "url_verification":
+            return {"challenge": body["challenge"]}
+        
         return await handler.handle(req)
     except Exception as e:
         logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
-        raise
+        return {"error": "An error occurred processing the Slack event"}
 
 @fastapi_app.get("/")
 async def health_check():
     logger.info("Health check endpoint accessed")
     return {"status": "healthy"}
+
+@fastapi_app.get("/debug/recent-events")
+async def get_recent_events():
+    return {"recent_events": list(recent_events)}
+
+@fastapi_app.get("/test-slack-app")
+async def test_slack_app():
+    if hasattr(app, 'dispatch'):
+        return {"status": "Slack app initialized correctly"}
+    else:
+        return {"status": "Slack app initialization issue", "app_attributes": dir(app)}
 
 # Middleware for request logging
 @fastapi_app.middleware("http")
