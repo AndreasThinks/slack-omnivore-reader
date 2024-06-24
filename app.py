@@ -159,6 +159,8 @@ def extract_url_from_message(message):
 
 
 async def save_to_omnivore(url):
+    url = url.rstrip('>') if url else url
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": OMNIVORE_API_KEY
