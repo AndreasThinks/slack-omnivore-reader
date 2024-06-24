@@ -1,6 +1,6 @@
 import os
 import json
-import requests
+import httpx
 import uuid
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi import SlackRequestHandler
@@ -73,7 +73,6 @@ async def save_to_omnivore(url):
 async def slack_events(req: Request):
     return await handler.handle(req)
 
-# For local development
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:fastapi_app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+@fastapi_app.get("/")
+async def health_check():
+    return {"status": "healthy"}
