@@ -74,10 +74,10 @@ async def handle_reaction(event, say, client):
             inclusive=True
         )
         
-        result_data = result.data
+        result_data = result.data if isinstance(result.data, dict) else {}
         logger.info(f"Conversation history result: {escape_user_input(json.dumps(result_data, indent=2))}")
         
-        if result_data["messages"]:
+        if result_data.get("messages"):
             message = result_data["messages"][0]
             logger.info(f"Retrieved message: {escape_user_input(json.dumps(message, indent=2))}")
             url = extract_and_validate_url(message)
@@ -85,11 +85,10 @@ async def handle_reaction(event, say, client):
             if url:
                 logger.info(f"URL extracted: {escape_user_input(url)}")
                 result = await save_to_omnivore(url)
-                if result and "data" in result and "saveUrl" in result["data"]:
+                if result and "data" in result and isinstance(result["data"], dict) and "saveUrl" in result["data"]:
                     saved_url = result["data"]["saveUrl"].get("url")
                     if saved_url:
                         reply_text = f"Saved URL to Omnivore with label '{escape_user_input(OMNIVORE_LABEL)}': {escape_user_input(saved_url)}"
-                        # Send the reply as a thread to the original message
                         await client.chat_postMessage(
                             channel=channel_id,
                             text=reply_text,
@@ -105,6 +104,7 @@ async def handle_reaction(event, say, client):
             logger.warning("No message found in the conversation history")
     except Exception as e:
         logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
+
 
 
 def is_valid_url(url):
@@ -129,30 +129,30 @@ def extract_and_validate_url(message):
     return None
 
 def extract_url_from_message(message):
-    # Check for URLs in the main text
     text = message.get("text", "")
     urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
     if urls:
         return urls[0]
     
-    # Check for URLs in attachments
     attachments = message.get("attachments", [])
-    for attachment in attachments:
-        attachment_text = attachment.get("text", "")
-        attachment_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', attachment_text)
-        if attachment_urls:
-            return attachment_urls[0]
+    if isinstance(attachments, list):
+        for attachment in attachments:
+            attachment_text = attachment.get("text", "")
+            attachment_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', attachment_text)
+            if attachment_urls:
+                return attachment_urls[0]
     
-    # Check for URLs in blocks (for messages with rich layouts)
     blocks = message.get("blocks", [])
-    for block in blocks:
-        if block["type"] == "section":
-            text = block.get("text", {}).get("text", "")
-            block_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-            if block_urls:
-                return block_urls[0]
+    if isinstance(blocks, list):
+        for block in blocks:
+            if block.get("type") == "section":
+                text = block.get("text", {}).get("text", "")
+                block_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+                if block_urls:
+                    return block_urls[0]
     
     return None
+
 
 
 async def save_to_omnivore(url):
@@ -161,7 +161,6 @@ async def save_to_omnivore(url):
         "Authorization": OMNIVORE_API_KEY
     }
     
-    # Get the label from an environment variable, with a default value if not set
     label = os.environ.get("OMNIVORE_LABEL", "SlackSaved")
     
     payload = {
@@ -196,7 +195,12 @@ async def save_to_omnivore(url):
         result = response.json()
         logger.info(f"Successfully saved URL to Omnivore: {url} with label: {label}")
         logger.debug(f"Omnivore API response: {json.dumps(result, indent=2)}")
-        return result
+        
+        if "data" in result and isinstance(result["data"], dict):
+            return result
+        else:
+            logger.error("Unexpected response format from Omnivore API")
+            return None
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error occurred while saving to Omnivore: {e}")
         raise
