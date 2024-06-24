@@ -1,0 +1,10 @@
+{
+    "name": "slack-omnivore-reader",
+    "description": "An link ingester for Omnivore",
+    "formation": {
+      "web": {
+        "quantity": 0,
+        "size": "eco"
+      }
+    }
+  }
