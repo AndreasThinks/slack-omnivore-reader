@@ -7,6 +7,7 @@ from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from fastapi import FastAPI, Request
 from collections import deque
+import re
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -63,11 +64,20 @@ async def handle_reaction(event, say, client):
         logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
 
 def extract_url_from_message(message):
+    # Check for URLs in the main text
     text = message.get("text", "")
-    words = text.split()
-    for word in words:
-        if word.startswith("http://") or word.startswith("https://"):
-            return word
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    if urls:
+        return urls[0]
+    
+    # Check for URLs in attachments
+    attachments = message.get("attachments", [])
+    for attachment in attachments:
+        attachment_text = attachment.get("text", "")
+        attachment_urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', attachment_text)
+        if attachment_urls:
+            return attachment_urls[0]
+    
     return None
 
 async def save_to_omnivore(url):
