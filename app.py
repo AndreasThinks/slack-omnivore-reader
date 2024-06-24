@@ -27,6 +27,9 @@ handler = AsyncSlackRequestHandler(app)
 OMNIVORE_API_URL = "https://api-prod.omnivore.app/api/graphql"
 OMNIVORE_API_KEY = os.environ["OMNIVORE_API_KEY"]
 
+
+# At the top of your file, add this line to get the label from an environment variable
+OMNIVORE_LABEL = os.environ.get("OMNIVORE_LABEL", "slack-import")
 # Store recent events for debugging
 recent_events = deque(maxlen=10)
 
@@ -91,6 +94,7 @@ def extract_url_from_message(message):
     
     return None
 
+
 async def save_to_omnivore(url):
     headers = {
         "Content-Type": "application/json",
@@ -98,12 +102,29 @@ async def save_to_omnivore(url):
     }
     
     payload = {
-        "query": "mutation SaveUrl($input: SaveUrlInput!) { saveUrl(input: $input) { ... on SaveSuccess { url clientRequestId } ... on SaveError { errorCodes message } } }",
+        "query": """
+        mutation SaveUrl($input: SaveUrlInput!) {
+            saveUrl(input: $input) {
+                ... on SaveSuccess {
+                    url
+                    clientRequestId
+                    labels {
+                        name
+                    }
+                }
+                ... on SaveError {
+                    errorCodes
+                    message
+                }
+            }
+        }
+        """,
         "variables": {
             "input": {
                 "clientRequestId": str(uuid.uuid4()),
                 "source": "api",
-                "url": url
+                "url": url,
+                "labels": [{"name": OMNIVORE_LABEL}]
             }
         }
     }
@@ -112,11 +133,14 @@ async def save_to_omnivore(url):
         async with httpx.AsyncClient() as client:
             response = await client.post(OMNIVORE_API_URL, headers=headers, json=payload)
         response.raise_for_status()
+        result = response.json()
         logger.info(f"Successfully saved URL to Omnivore: {url}")
+        logger.info(f"Omnivore save result: {json.dumps(result, indent=2)}")
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error occurred while saving to Omnivore: {e}")
     except Exception as e:
         logger.error(f"An error occurred while saving to Omnivore: {str(e)}", exc_info=True)
+
 
 @app.event("*")
 async def capture_all_events(event):
