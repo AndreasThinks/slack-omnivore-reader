@@ -42,7 +42,7 @@ fastapi_app.add_middleware(HTTPSRedirectMiddleware)
 
 
 # Set up rate limiting
-RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 3))
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 20))
 RATE_LIMIT = f"{RATE_LIMIT_PER_MINUTE}/minute"
 limiter = MovingWindowRateLimiter(MemoryStorage())
 rate_limits = parse_many(RATE_LIMIT)
