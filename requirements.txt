@@ -4,3 +4,4 @@ slack_bolt
 fastapi
 uvicorn
 httpx
+aiohttp
