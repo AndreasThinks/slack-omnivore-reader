@@ -101,6 +101,9 @@ async def save_to_omnivore(url):
         "Authorization": OMNIVORE_API_KEY
     }
     
+    # Get the label from an environment variable, with a default value if not set
+    label = os.environ.get("OMNIVORE_LABEL", "SlackSaved")
+    
     payload = {
         "query": """
         mutation SaveUrl($input: SaveUrlInput!) {
@@ -108,9 +111,6 @@ async def save_to_omnivore(url):
                 ... on SaveSuccess {
                     url
                     clientRequestId
-                    labels {
-                        name
-                    }
                 }
                 ... on SaveError {
                     errorCodes
@@ -124,7 +124,7 @@ async def save_to_omnivore(url):
                 "clientRequestId": str(uuid.uuid4()),
                 "source": "api",
                 "url": url,
-                "labels": [{"name": OMNIVORE_LABEL}]
+                "labels": [{"name": label}]
             }
         }
     }
@@ -134,12 +134,15 @@ async def save_to_omnivore(url):
             response = await client.post(OMNIVORE_API_URL, headers=headers, json=payload)
         response.raise_for_status()
         result = response.json()
-        logger.info(f"Successfully saved URL to Omnivore: {url}")
-        logger.info(f"Omnivore save result: {json.dumps(result, indent=2)}")
+        logger.info(f"Successfully saved URL to Omnivore: {url} with label: {label}")
+        logger.debug(f"Omnivore API response: {json.dumps(result, indent=2)}")
+        return result
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error occurred while saving to Omnivore: {e}")
+        raise
     except Exception as e:
         logger.error(f"An error occurred while saving to Omnivore: {str(e)}", exc_info=True)
+        raise
 
 
 @app.event("*")
