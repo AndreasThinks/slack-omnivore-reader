@@ -13,7 +13,7 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from collections import deque
 import re
 from urllib.parse import urlparse
-from limits import RateLimitItem
+from limits import parse_many
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from dotenv import load_dotenv
@@ -40,10 +40,12 @@ handler = AsyncSlackRequestHandler(app)
 fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 fastapi_app.add_middleware(HTTPSRedirectMiddleware)
 
+
 # Set up rate limiting
-RATE_LIMIT = "100 per minute"
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 3))
+RATE_LIMIT = f"{RATE_LIMIT_PER_MINUTE}/minute"
 limiter = MovingWindowRateLimiter(MemoryStorage())
-rate_limit_item = RateLimitItem(RATE_LIMIT)
+rate_limits = parse_many(RATE_LIMIT)
 
 OMNIVORE_API_URL = "https://api-prod.omnivore.app/api/graphql"
 OMNIVORE_API_KEY = os.environ["OMNIVORE_API_KEY"]
@@ -207,9 +209,10 @@ async def save_to_omnivore(url):
 async def capture_all_events(event):
     recent_events.appendleft(event)
 
+# Then, in your slack_events function:
 @fastapi_app.post("/slack/events")
 async def slack_events(req: Request):
-    if limiter.hit(rate_limit_item):
+    if limiter.hit(rate_limits):
         try:
             body = await req.json()
             logger.info(f"Received Slack event: {escape_user_input(json.dumps(body, indent=2))}")
