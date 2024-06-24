@@ -25,7 +25,7 @@
     },
     "settings": {
         "event_subscriptions": {
-            "request_url": "https://slack-omnivore-reader-19bdfd0b9338.herokuapp.com/slack/events",
+            "request_url": "https://your-heroku-app.herokuapp.com/slack/events",
             "bot_events": [
                 "reaction_added"
             ]
