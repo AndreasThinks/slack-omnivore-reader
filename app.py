@@ -48,7 +48,6 @@ async def handle_reaction(event, say, client):
             inclusive=True
         )
         
-        # Extract the data from AsyncSlackResponse
         result_data = result.data
         logger.info(f"Conversation history result: {json.dumps(result_data, indent=2)}")
         
@@ -59,10 +58,29 @@ async def handle_reaction(event, say, client):
             
             if url:
                 logger.info(f"URL extracted: {url}")
-                await save_to_omnivore(url)
-                await say(f"Saved URL to Omnivore: {url}")
+                result = await save_to_omnivore(url)
+                if result and "data" in result and "saveUrl" in result["data"]:
+                    saved_url = result["data"]["saveUrl"].get("url")
+                    if saved_url:
+                        reply_text = f"Saved URL to Omnivore with label '{OMNIVORE_LABEL}': {saved_url}"
+                    else:
+                        reply_text = f"Attempted to save URL to Omnivore, but encountered an issue."
+                else:
+                    reply_text = f"Failed to save URL to Omnivore. Please check the logs for more information."
+                
+                # Send the reply as a thread to the original message
+                await client.chat_postMessage(
+                    channel=channel_id,
+                    text=reply_text,
+                    thread_ts=message_ts
+                )
             else:
                 logger.warning("No URL found in the message")
+                await client.chat_postMessage(
+                    channel=channel_id,
+                    text="No URL found in the message to save to Omnivore.",
+                    thread_ts=message_ts
+                )
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
