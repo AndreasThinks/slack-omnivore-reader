@@ -1,42 +1,46 @@
 {
-    "name": "Slack Omnivore Integration",
-    "description": "Save URLs from Slack to Omnivore",
-    "repository": "https://github.com/AndreasThinks/slack-omnivore-reader",
-    "keywords": ["python", "slack", "omnivore", "fastapi"],
-    "env": {
-      "SLACK_BOT_TOKEN": {
-        "description": "Slack Bot Token"
-      },
-      "SLACK_SIGNING_SECRET": {
-        "description": "Slack Signing Secret"
-      },
-      "OMNIVORE_API_KEY": {
-        "description": "Omnivore API Key"
-      },
-      "ALLOWED_HOSTS": {
-        "description": "Comma-separated list of allowed hosts",
-        "value": ".herokuapp.com"
-      },
-      "OMNIVORE_LABEL": {
-        "description": "Label to apply to saved articles in Omnivore",
-        "required": false,
-        "value": "slack-import"
-      },
-      "RATE_LIMIT_PER_MINUTE": {
-        "description": "Number of requests allowed per minute",
-        "required": false,
-        "value": "3"
-      }
+  "name": "Slack Omnivore Integration",
+  "description": "Save URLs from Slack to Omnivore",
+  "repository": "https://github.com/AndreasThinks/slack-omnivore-reader",
+  "keywords": ["python", "slack", "omnivore", "fastapi"],
+  "env": {
+    "SLACK_BOT_TOKEN": {
+      "description": "Slack Bot Token"
     },
-    "buildpacks": [
-      {
-        "url": "heroku/python"
-      }
-    ],
-    "formation": {
-      "web": {
-        "quantity": 0,
-        "size": "eco"
-      }
+    "SLACK_SIGNING_SECRET": {
+      "description": "Slack Signing Secret"
+    },
+    "OMNIVORE_API_KEY": {
+      "description": "Omnivore API Key"
+    },
+    "ALLOWED_HOSTS": {
+      "description": "Comma-separated list of allowed hosts",
+      "value": ".herokuapp.com"
+    },
+    "OMNIVORE_LABEL": {
+      "description": "Label to apply to saved articles in Omnivore",
+      "required": false,
+      "value": "slack-import"
+    },
+    "RATE_LIMIT_PER_MINUTE": {
+      "description": "Number of requests allowed per minute",
+      "required": false,
+      "value": "3"
+    },
+    "TRIGGER_EMOJIS": {
+      "description": "Comma-separated list of emojis that trigger the bot (leave empty to trigger on any emoji)",
+      "required": false
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "formation": {
+    "web": {
+      "quantity": 0,
+      "size": "eco"
     }
   }
+}

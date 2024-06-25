@@ -7,3 +7,5 @@ httpx
 aiohttp
 limits
 python-dotenv
+pydantic
+pydantic-settings
