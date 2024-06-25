@@ -1,0 +1,37 @@
+{
+    "display_information": {
+        "name": "omnivore-reader",
+        "description": "A bot to collect posted articles and save them to Omnivore.",
+        "background_color": "#000000",
+        "long_description": "A Slack bot that automatically collects any links which have been reacted to in the channels where it has been added, and then saves them to an Omnivore list for future reading. \r\n\r\nThe bot must be paired with an API back-end, which can be quickly deployed on Heroku: https://github.com/AndreasThinks/slack-omnivore-reader"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "omnivore-reader",
+            "always_online": false
+        }
+    },
+    "oauth_config": {
+        "redirect_urls": [
+            "https://github.com/AndreasThinks/slack-omnivore-reader"
+        ],
+        "scopes": {
+            "bot": [
+                "reactions:read",
+                "channels:history",
+                "chat:write"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "request_url": "https://your-heroku-app.herokuapp.com/slack/events",
+            "bot_events": [
+                "reaction_added"
+            ]
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "token_rotation_enabled": false
+    }
+}

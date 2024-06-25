@@ -12,7 +12,7 @@ This application integrates Slack with Omnivore, allowing you to save URLs share
 - Secure handling of environment variables
 
 ## Deployment
-Click the "Deploy to Heroku" button above to start the deployment process. You'll need to provide the following environment variables:
+Click the "Deploy to Heroku" button above to start the deployment process. Don't worry if you don't have all of these yet, you'll get the rest after deploying your Slack App.
 
 - `SLACK_BOT_TOKEN`: Your Slack Bot Token
 - `SLACK_SIGNING_SECRET`: Your Slack Signing Secret
@@ -26,6 +26,23 @@ Click the "Deploy to Heroku" button above to start the deployment process. You'l
 1. Add the Slack bot to your workspace and invite it to the desired channels.
 2. When a message containing a URL is posted, react to it with one of the specified emojis (or any emoji if `TRIGGER_EMOJIS` is not set).
 3. The bot will extract the URL, save it to Omnivore with the specified label, and post a confirmation message in the thread.
+
+## Installation
+To add the application to Slack, you *must* have deployed the back-end on Heroku using the process above.
+
+Once this is complete, you can create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions). You can either use our [Slack Manifest](manifest.json), or follow the manual steps below.
+
+- In the "oAuth & Permissions" section, enable **channels:history**, **chat:write** and **reactions:read**, and obtain your SLACK_BOT_TOKEN.
+- In the "Event Subscriptions" section, add "reaction_added" to bot events
+
+Once your bot has been installed, follow the configuration steps below.
+
+- In the "Event Subscriptions" section, add your full Heroku application URL (in the format https://your-heroku-app.herokuapp.com/slack/events) as the request URL. 
+- If you do not already have one, create an [Omnivore](https://omnivore.app/) account, and [get an API key](https://omnivore.app/settings/api).
+- From the Heroku web-interface, add all environment variables to your application.
+- From within your Slack client, add your bot to a channel by sending them a DM
+
+That's it!  Test it by reacting to a post with a valid URL. You should be able to see the event in your Heroku logs, and it will appear in your Omnivore library.
 
 ## Local Development
 1. Clone this repository
