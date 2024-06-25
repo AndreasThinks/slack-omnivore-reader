@@ -7,10 +7,18 @@ from limits.strategies import MovingWindowRateLimiter
 
 from config import settings
 
-def setup_logging() -> logging.Logger:
-    logging.basicConfig(level=settings.LOG_LEVEL)
-    logger = logging.getLogger(__name__)
-    return logger
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Reduce logging for some verbose libraries
+    # TODO decide if we want to add these back
+    # logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('slack_bolt').setLevel(logging.WARNING)
+
 
 def setup_rate_limiter():
     return MovingWindowRateLimiter(MemoryStorage())

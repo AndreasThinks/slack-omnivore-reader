@@ -8,11 +8,9 @@ from limits import parse_many
 from config import settings
 from slack_handlers import app as slack_app
 from utils import setup_rate_limiter, setup_logging
-import logging
-logging.basicConfig(level=logging.DEBUG)
 
-# Set up logging
-logger = setup_logging()
+# Call this function at the start of your application
+setup_logging()
 
 # Initialize FastAPI app
 fastapi_app = FastAPI()

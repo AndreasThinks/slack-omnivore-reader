@@ -5,7 +5,7 @@ from omnivore_client import OmnivoreClient
 from utils import extract_and_validate_url, get_trigger_emojis
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)  # Changed from DEBUG to INFO
 
 app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
@@ -17,17 +17,13 @@ trigger_emojis = get_trigger_emojis()
 
 @app.event("reaction_added")
 async def handle_reaction(event, say, client):
-    logger.debug(f"Received reaction_added event: {event}")
-    
     if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
-        logger.debug(f"Reaction {event['reaction']} is not in the trigger list. Ignoring.")
         return
 
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
     
     try:
-        logger.debug(f"Fetching message from channel {channel_id} with timestamp {message_ts}")
         result = await client.conversations_history(
             channel=channel_id,
             latest=message_ts,
@@ -37,11 +33,9 @@ async def handle_reaction(event, say, client):
         
         if result.data.get("messages"):
             message = result.data["messages"][0]
-            logger.debug(f"Retrieved message: {message}")
             url = extract_and_validate_url(message)
             
             if url:
-                logger.debug(f"URL extracted and validated: {url}")
                 result = await omnivore_client.save_url(url)
                 if result and "data" in result and "saveUrl" in result["data"]:
                     saved_url = result["data"]["saveUrl"].get("url")
@@ -60,18 +54,16 @@ async def handle_reaction(event, say, client):
                             thread_ts=message_ts
                         )
                 else:
-                    logger.error("Failed to save URL to Omnivore. Please check the logs for more information.")
+                    logger.error("Failed to save URL to Omnivore.")
                     await client.chat_postMessage(
                         channel=channel_id,
                         text="Failed to save the URL to Omnivore. Please check the logs for more information.",
                         thread_ts=message_ts
                     )
-            else:
-                logger.debug("No valid URL found in the message. Remaining silent.")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
-        logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
+        logger.error(f"Error handling reaction: {str(e)}")
         await client.chat_postMessage(
             channel=channel_id,
             text="An error occurred while processing the reaction. Please check the logs for more information.",
