@@ -5,6 +5,7 @@ from omnivore_client import OmnivoreClient
 from utils import extract_and_validate_url, get_trigger_emojis
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Set to DEBUG level
 
 app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
@@ -16,17 +17,17 @@ trigger_emojis = get_trigger_emojis()
 
 @app.event("reaction_added")
 async def handle_reaction(event, say, client):
-    logger.info(f"Received reaction_added event: {event}")
+    logger.debug(f"Received reaction_added event: {event}")
     
     if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
-        logger.info(f"Reaction {event['reaction']} is not in the trigger list. Ignoring.")
+        logger.debug(f"Reaction {event['reaction']} is not in the trigger list. Ignoring.")
         return
 
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
     
     try:
-        logger.info(f"Fetching message from channel {channel_id} with timestamp {message_ts}")
+        logger.debug(f"Fetching message from channel {channel_id} with timestamp {message_ts}")
         result = await client.conversations_history(
             channel=channel_id,
             latest=message_ts,
@@ -36,11 +37,11 @@ async def handle_reaction(event, say, client):
         
         if result.data.get("messages"):
             message = result.data["messages"][0]
-            logger.info(f"Retrieved message: {message}")
+            logger.debug(f"Retrieved message: {message}")
             url = extract_and_validate_url(message)
             
             if url:
-                logger.info(f"URL extracted and validated: {url}")
+                logger.debug(f"URL extracted and validated: {url}")
                 result = await omnivore_client.save_url(url, settings.OMNIVORE_LABEL)
                 if result:
                     reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {result}"
@@ -57,7 +58,7 @@ async def handle_reaction(event, say, client):
                         thread_ts=message_ts
                     )
             else:
-                logger.info("No valid URL found in the message. Remaining silent.")
+                logger.debug("No valid URL found in the message. Remaining silent.")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:

@@ -1,4 +1,3 @@
-import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -9,6 +8,8 @@ from limits import parse_many
 from config import settings
 from slack_handlers import app as slack_app
 from utils import setup_rate_limiter, setup_logging
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Set up logging
 logger = setup_logging()
