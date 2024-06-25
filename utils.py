@@ -18,10 +18,13 @@ def setup_logging():
     # TODO decide if we want to add these back
     # logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('slack_bolt').setLevel(logging.WARNING)
+    return logging.getLogger(__name__)
+
 
 
 def setup_rate_limiter():
     return MovingWindowRateLimiter(MemoryStorage())
+
 def get_trigger_emojis() -> Optional[List[str]]:
     if settings.TRIGGER_EMOJIS:
         return [emoji.strip() for emoji in settings.TRIGGER_EMOJIS.split(',')]
