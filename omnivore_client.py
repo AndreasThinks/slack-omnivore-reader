@@ -3,6 +3,7 @@ import logging
 import json
 import secrets
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,20 @@ class OmnivoreClient:
             "Authorization": self.api_key
         }
         
+        # Create a SaveUrlInput that matches the schema
+        save_url_input = {
+            "url": url,
+            "source": "slack_bot",
+            "clientRequestId": secrets.token_urlsafe(),
+            "state": "SUCCEEDED",  # Assuming we want to save it as succeeded
+            "labels": [{"name": label}],
+            "locale": "en-US",  # You might want to make this configurable
+            "timezone": str(datetime.now(timezone.utc).astimezone().tzinfo),
+            "savedAt": datetime.now(timezone.utc).isoformat(),
+            # "publishedAt" is optional, so we're not including it
+            # "folder" is optional, so we're not including it
+        }
+
         payload = {
             "query": """
             mutation SaveUrl($input: SaveUrlInput!) {
@@ -33,17 +48,13 @@ class OmnivoreClient:
             }
             """,
             "variables": {
-                "input": {
-                    "clientRequestId": secrets.token_urlsafe(),
-                    "source": "api",
-                    "url": url,
-                    "labels": [{"name": label}]
-                }
+                "input": save_url_input
             }
         }
         
         logger.debug(f"Sending request to Omnivore API. URL: {url}, Label: {label}")
         logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
+        logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
 
         try:
             async with httpx.AsyncClient() as client:
@@ -93,3 +104,36 @@ class OmnivoreClient:
         else:
             logger.error(f"Unexpected response format from Omnivore API: {result}")
         return None
+
+    async def test_connection(self) -> bool:
+        """Test the connection to Omnivore API"""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": self.api_key
+        }
+        
+        payload = {
+            "query": """
+            query {
+                me {
+                    id
+                    name
+                }
+            }
+            """
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            if "data" in result and "me" in result["data"]:
+                logger.info(f"Successfully connected to Omnivore API. User: {result['data']['me']['name']}")
+                return True
+            else:
+                logger.error(f"Unexpected response from Omnivore API: {result}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to connect to Omnivore API: {str(e)}")
+            return False
