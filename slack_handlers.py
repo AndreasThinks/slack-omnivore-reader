@@ -5,7 +5,7 @@ from omnivore_client import OmnivoreClient
 from utils import extract_and_validate_url, get_trigger_emojis
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Set to DEBUG level
+logger.setLevel(logging.DEBUG)
 
 app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
@@ -42,16 +42,25 @@ async def handle_reaction(event, say, client):
             
             if url:
                 logger.debug(f"URL extracted and validated: {url}")
-                result = await omnivore_client.save_url(url, settings.OMNIVORE_LABEL)
-                if result:
-                    reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {result}"
-                    await client.chat_postMessage(
-                        channel=channel_id,
-                        text=reply_text,
-                        thread_ts=message_ts
-                    )
+                result = await omnivore_client.save_url(url)
+                if result and "data" in result and "saveUrl" in result["data"]:
+                    saved_url = result["data"]["saveUrl"].get("url")
+                    if saved_url:
+                        reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {saved_url}"
+                        await client.chat_postMessage(
+                            channel=channel_id,
+                            text=reply_text,
+                            thread_ts=message_ts
+                        )
+                    else:
+                        logger.warning("Attempted to save URL to Omnivore, but encountered an issue.")
+                        await client.chat_postMessage(
+                            channel=channel_id,
+                            text="Failed to save the URL to Omnivore. Please check the logs for more information.",
+                            thread_ts=message_ts
+                        )
                 else:
-                    logger.warning(f"Failed to save URL to Omnivore: {url}")
+                    logger.error("Failed to save URL to Omnivore. Please check the logs for more information.")
                     await client.chat_postMessage(
                         channel=channel_id,
                         text="Failed to save the URL to Omnivore. Please check the logs for more information.",
