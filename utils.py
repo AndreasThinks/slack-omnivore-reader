@@ -19,6 +19,14 @@ def get_trigger_emojis() -> Optional[List[str]]:
         return [emoji.strip() for emoji in settings.TRIGGER_EMOJIS.split(',')]
     return None
 
+def sanitize_url(url: str) -> str:
+    # Remove any trailing '>' characters and whitespace
+    sanitized = url.rstrip('>').strip()
+    # Ensure the URL starts with http:// or https://
+    if not sanitized.startswith(('http://', 'https://')):
+        sanitized = 'http://' + sanitized
+    return sanitized
+
 def is_valid_url(url: str) -> bool:
     try:
         result = urlparse(url)
@@ -26,16 +34,12 @@ def is_valid_url(url: str) -> bool:
     except ValueError:
         return False
 
-def sanitize_url(url: str) -> str:
-    sanitized = url.strip().strip('"\'')
-    if not sanitized.startswith(('http://', 'https://')):
-        sanitized = 'http://' + sanitized
-    return sanitized
-
 def extract_and_validate_url(message: dict) -> Optional[str]:
     url = extract_url_from_message(message)
-    if url and is_valid_url(url):
-        return sanitize_url(url)
+    if url:
+        sanitized_url = sanitize_url(url)
+        if is_valid_url(sanitized_url):
+            return sanitized_url
     return None
 
 def extract_url_from_message(message: dict) -> Optional[str]:

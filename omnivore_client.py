@@ -1,8 +1,8 @@
 import httpx
 import logging
+import json
 from typing import Optional, Dict, Any
 import secrets
-
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +12,6 @@ class OmnivoreClient:
         self.api_url = "https://api-prod.omnivore.app/api/graphql"
 
     async def save_url(self, url: str, label: str) -> Optional[str]:
-
-        # TODO improve this, currently cleaning weird trailng > bug
-        url = url.rstrip('>') if url else url
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": self.api_key
@@ -65,6 +61,8 @@ class OmnivoreClient:
             return None
 
     def _process_omnivore_response(self, result: Dict[str, Any], url: str, label: str) -> Optional[str]:
+        logger.debug(f"Raw Omnivore response: {json.dumps(result, indent=2)}")
+        
         if "data" in result and "saveUrl" in result["data"]:
             save_url_result = result["data"]["saveUrl"]
             if "url" in save_url_result:
@@ -74,6 +72,7 @@ class OmnivoreClient:
                 error_codes = save_url_result["errorCodes"]
                 error_message = save_url_result.get("message", "No error message provided")
                 logger.error(f"Failed to save URL to Omnivore. Error codes: {error_codes}, Message: {error_message}")
+                logger.error(f"Attempted to save URL: {url}")
             else:
                 logger.error(f"Unexpected saveUrl response format: {save_url_result}")
         else:

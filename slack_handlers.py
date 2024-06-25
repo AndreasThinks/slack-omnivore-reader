@@ -14,12 +14,10 @@ app = AsyncApp(
 omnivore_client = OmnivoreClient(settings.OMNIVORE_API_KEY)
 trigger_emojis = get_trigger_emojis()
 
-
 @app.event("reaction_added")
 async def handle_reaction(event, say, client):
     logger.info(f"Received reaction_added event: {event}")
     
-    # Check if the reaction should trigger the bot
     if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
         logger.info(f"Reaction {event['reaction']} is not in the trigger list. Ignoring.")
         return
@@ -42,7 +40,7 @@ async def handle_reaction(event, say, client):
             url = extract_and_validate_url(message)
             
             if url:
-                logger.info(f"URL extracted: {url}")
+                logger.info(f"URL extracted and validated: {url}")
                 result = await omnivore_client.save_url(url, settings.OMNIVORE_LABEL)
                 if result:
                     reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {result}"
@@ -52,10 +50,20 @@ async def handle_reaction(event, say, client):
                         thread_ts=message_ts
                     )
                 else:
-                    logger.warning("Failed to save URL to Omnivore")
+                    logger.warning(f"Failed to save URL to Omnivore: {url}")
+                    await client.chat_postMessage(
+                        channel=channel_id,
+                        text="Failed to save the URL to Omnivore. Please check the logs for more information.",
+                        thread_ts=message_ts
+                    )
             else:
-                logger.info("No URL found in the message. Remaining silent.")
+                logger.info("No valid URL found in the message. Remaining silent.")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
         logger.error(f"Error handling reaction: {str(e)}", exc_info=True)
+        await client.chat_postMessage(
+            channel=channel_id,
+            text="An error occurred while processing the reaction. Please check the logs for more information.",
+            thread_ts=message_ts
+        )
