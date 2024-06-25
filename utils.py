@@ -7,19 +7,17 @@ from limits.strategies import MovingWindowRateLimiter
 
 from config import settings
 
-
-def get_trigger_emojis() -> Optional[List[str]]:
-    if settings.TRIGGER_EMOJIS:
-        return [emoji.strip() for emoji in settings.TRIGGER_EMOJIS.split(',')]
-    return None
-
 def setup_logging() -> logging.Logger:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=settings.LOG_LEVEL)
     logger = logging.getLogger(__name__)
     return logger
 
 def setup_rate_limiter():
     return MovingWindowRateLimiter(MemoryStorage())
+def get_trigger_emojis() -> Optional[List[str]]:
+    if settings.TRIGGER_EMOJIS:
+        return [emoji.strip() for emoji in settings.TRIGGER_EMOJIS.split(',')]
+    return None
 
 def is_valid_url(url: str) -> bool:
     try:

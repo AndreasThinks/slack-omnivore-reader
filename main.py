@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
+from limits import parse_many
 
 from config import settings
 from slack_handlers import app as slack_app
@@ -22,14 +23,16 @@ fastapi_app.add_middleware(HTTPSRedirectMiddleware)
 
 # Set up rate limiting
 limiter = setup_rate_limiter()
+rate_limits = parse_many(settings.RATE_LIMIT)
 
 @fastapi_app.post("/slack/events")
 async def slack_events(req: Request):
     try:
         # Check rate limits
-        if not limiter.hit(settings.RATE_LIMIT, "global", req.client.host):
-            logger.warning("Rate limit exceeded")
-            raise HTTPException(status_code=429, detail="Too many requests")
+        for rate_limit in rate_limits:
+            if not limiter.hit(rate_limit, "global", req.client.host):
+                logger.warning("Rate limit exceeded")
+                raise HTTPException(status_code=429, detail="Too many requests")
         
         body = await req.json()
         logger.info(f"Received Slack event: {body}")
