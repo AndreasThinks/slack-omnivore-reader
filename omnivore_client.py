@@ -13,13 +13,83 @@ class OmnivoreClient:
         self.api_url = "https://api-prod.omnivore.app/api/graphql"
         self.label = os.environ.get("OMNIVORE_LABEL", "SlackSaved")
 
-    async def save_url(self, url: str) -> Optional[Dict[str, Any]]:
-        url = url.rstrip('>') if url else url
+    async def search_url(self, url: str) -> bool:
+        querystring = {
+            "after": "null",
+            "first": "10",
+            "query": f'url:"{url}"'
+        }
+
+        payload = {
+            "query": """
+            query Search($after: String, $first: Int, $query: String) {
+              search(after: $after, first: $first, query: $query) {
+                ... on SearchSuccess {
+                  edges {
+                    node {
+                      id
+                      title
+                      url
+                    }
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                    totalCount
+                  }
+                }
+                ... on SearchError {
+                  errorCodes
+                }
+              }
+            }
+            """,
+            "operationName": "Search"
+        }
+
         headers = {
             "Content-Type": "application/json",
+            "User-Agent": "OmnivoreClient/1.0",
             "Authorization": self.api_key
         }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.api_url, data=json.dumps(payload), headers=headers, params=querystring)
+            response.raise_for_status()
+            result = response.json()
+            
+            logger.debug(f"Search URL response: {json.dumps(result, indent=2)}")
+            
+            if "data" in result and "search" in result["data"]:
+                search_result = result["data"]["search"]
+                if "edges" in search_result:
+                    for edge in search_result["edges"]:
+                        if edge["node"]["url"] == url:
+                            logger.info(f"Exact URL match found in Omnivore: {url}")
+                            return True
+                    logger.info(f"Exact URL not found in Omnivore: {url}")
+                    return False
+                else:
+                    logger.info(f"No search results for URL: {url}")
+                    return False
+            logger.warning(f"Unexpected search result format for URL: {url}")
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error occurred while searching Omnivore: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"An error occurred while searching Omnivore: {str(e)}")
+            raise
+
+    async def save_url(self, url: str) -> Optional[Dict[str, Any]]:
+        url = url.rstrip('>') if url else url
         
+        # Check if the URL already exists
+        if await self.search_url(url):
+            logger.info(f"URL already exists, skipping save: {url}")
+            return None
+
         payload = {
             "query": """
             mutation SaveUrl($input: SaveUrlInput!) {
@@ -45,9 +115,14 @@ class OmnivoreClient:
             }
         }
 
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": self.api_key
+        }
+
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(self.api_url, headers=headers, json=payload)
+                response = await client.post(self.api_url, json=payload, headers=headers)
             response.raise_for_status()
             result = response.json()
             
@@ -63,19 +138,3 @@ class OmnivoreClient:
         except Exception as e:
             logger.error(f"An error occurred while saving to Omnivore: {str(e)}")
             raise
-
-    def _process_omnivore_response(self, result: Dict[str, Any], url: str) -> Optional[str]:
-        if "data" in result and "saveUrl" in result["data"]:
-            save_url_result = result["data"]["saveUrl"]
-            if isinstance(save_url_result, dict):
-                if "url" in save_url_result:
-                    return save_url_result["url"]
-                elif "errorCodes" in save_url_result:
-                    error_codes = save_url_result["errorCodes"]
-                    error_message = save_url_result.get("message", "No error message provided")
-                    logger.error(f"Failed to save URL to Omnivore. Error codes: {error_codes}, Message: {error_message}")
-            else:
-                logger.error("Unexpected saveUrl data type: " + str(type(save_url_result)))
-        else:
-            logger.error(f"Unexpected response format from Omnivore API")
-        return None

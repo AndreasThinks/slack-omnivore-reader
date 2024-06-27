@@ -5,7 +5,7 @@ from omnivore_client import OmnivoreClient
 from utils import extract_and_validate_url, get_trigger_emojis
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Changed from DEBUG to INFO
+logger.setLevel(logging.INFO)
 
 app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
@@ -36,36 +36,28 @@ async def handle_reaction(event, say, client):
             url = extract_and_validate_url(message)
             
             if url:
-                result = await omnivore_client.save_url(url)
-                if result and "data" in result and "saveUrl" in result["data"]:
-                    saved_url = result["data"]["saveUrl"].get("url")
-                    if saved_url:
-                        reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {saved_url}"
-                        await client.chat_postMessage(
-                            channel=channel_id,
-                            text=reply_text,
-                            thread_ts=message_ts
-                        )
-                    else:
-                        logger.warning("Attempted to save URL to Omnivore, but encountered an issue.")
-                        await client.chat_postMessage(
-                            channel=channel_id,
-                            text="Failed to save the URL to Omnivore. Please check the logs for more information.",
-                            thread_ts=message_ts
-                        )
+                # First, check if the URL already exists
+                url_exists = await omnivore_client.search_url(url)
+                if url_exists:
+                    logger.info(f"URL already exists in Omnivore, skipping: {url}")
+                    # No message is posted to Slack for duplicate URLs
                 else:
-                    logger.error("Failed to save URL to Omnivore.")
-                    await client.chat_postMessage(
-                        channel=channel_id,
-                        text="Failed to save the URL to Omnivore. Please check the logs for more information.",
-                        thread_ts=message_ts
-                    )
+                    # If the URL doesn't exist, save it
+                    result = await omnivore_client.save_url(url)
+                    if result and "data" in result and "saveUrl" in result["data"]:
+                        saved_url = result["data"]["saveUrl"].get("url")
+                        if saved_url:
+                            reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {saved_url}"
+                            await client.chat_postMessage(
+                                channel=channel_id,
+                                text=reply_text,
+                                thread_ts=message_ts
+                            )
+                        else:
+                            logger.warning(f"Attempted to save URL to Omnivore, but encountered an issue: {url}")
+                    else:
+                        logger.error(f"Failed to save URL to Omnivore: {url}")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
         logger.error(f"Error handling reaction: {str(e)}")
-        await client.chat_postMessage(
-            channel=channel_id,
-            text="An error occurred while processing the reaction. Please check the logs for more information.",
-            thread_ts=message_ts
-        )
