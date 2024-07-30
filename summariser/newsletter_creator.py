@@ -17,9 +17,44 @@ import pandas as pd
 from tqdm import tqdm
 from dotenv import load_dotenv
 import subprocess
-
+from fasthtml.common import database
 
 load_dotenv()
+db = database('data/items.db')
+
+items = db.t.items
+comparisons = db.t.comparisons
+last_update = db.t.last_update
+newsletter_summaries = db.t.newsletter_summaries
+
+if items not in db.t:
+    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+    comparisons.create(id=int, item1_id=int, item2_id=int, pk='id')
+    last_update.create(id=int, update_date=str, pk='id')
+    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
+
+def get_last_update_date():
+    result = last_update(order_by='-id', limit=1)
+    return datetime.strptime(result[0]['update_date'], '%Y-%m-%d').date() if result else None
+
+def set_last_update_date(date):
+    last_update.insert({'update_date': date.strftime('%Y-%m-%d')})
+
+
+def update_items_from_csv():
+    df = pd.read_csv('summariser/item_summaries.csv')
+    current_date = datetime.now().date()
+    for _, row in df.iterrows():
+        items.upsert({
+            'id': row['id'],
+            'title': row['title'],
+            'url': row['url'],
+            'long_summary': row['long_summary'],
+            'short_summary': row['short_summary'],
+            'interest_score': row['interest_score'],
+            'added_date': current_date.strftime('%Y-%m-%d')
+        })
+    set_last_update_date(current_date)
 
 def query_recent_omnivore_articles(days=14, limit=25):
     api_token = os.getenv("OMNIVORE_API_KEY")
@@ -74,6 +109,69 @@ def query_recent_omnivore_articles(days=14, limit=25):
         print(f"Error querying Omnivore API: {e}")
         return []
 
+def generate_newsletter_summary():
+    client = anthropic.Anthropic()
+    
+    # Query the database for relevant articles
+    df = pd.DataFrame(items())
+    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+    
+    # Prepare the content for the summary
+    articles_content = ""
+    for _, article in df_sorted.iterrows():
+        articles_content += f"Title: {article['title']}\n"
+        articles_content += f"URL: {article['url']}\n"
+        articles_content += f"Summary: {article['long_summary']}\n\n"
+
+    prompt = f"""
+    You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
+    Here are the articles for this week's newsletter:
+    <articles>
+    {articles_content[:3000]}  # Truncate to avoid token limits
+    </articles>
+
+    To create an effective summary, please follow these steps:
+
+    1. Carefully read through the provided article information.
+    2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
+    3. Focus on information that would be most relevant and appealing to the newsletter's audience.
+    4. Condense the key points into a brief summary, keeping it between 4-7 lines long.
+    5. Ensure your summary is factual while also sounding exciting and inspiring.
+    6. Use language that engages the reader and encourages them to explore the full newsletter.
+    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
+    8. Make specific references to "this week" to emphasize the current nature of the information.
+
+    Your summary should be written in a tone that is:
+    - Professional yet approachable
+    - Enthusiastic without being overly promotional
+    - Informative and concise
+
+    Please provide your summary within <summary> tags. Remember to keep it between 3-5 lines long, focusing on the most notable and exciting elements of this week's newsletter.
+    """
+    
+    try:
+        message = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1000,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        summary = message.content[0].text
+        summary = summary.replace('<summary>', '').replace('</summary>', '').strip()
+        
+        # Save the summary to the database
+        current_date = datetime.now().date().strftime('%Y-%m-%d')
+        newsletter_summaries.insert({
+            'date': current_date,
+            'summary': summary
+        })
+        
+        print(f"Newsletter summary for {current_date} saved to the database.")
+        return summary
+    except Exception as e:
+        print(f"Error generating or saving newsletter summary: {e}")
+        return ""
+    
 def generate_article_summary(title, url, content):
     client = anthropic.Anthropic()
     prompt = f"""
@@ -117,16 +215,33 @@ def process_articles():
             processed_data.append({
                 'title': article['title'],
                 'url': article['url'],
+                'content': article['content'],
                 'interest_score': summary['interest_score'],
                 'short_summary': summary['short_summary'],
-                'long_summary': summary['long_summary']
+                'long_summary': summary['long_summary'],
+                'added_date': datetime.now().strftime('%Y-%m-%d')
             })
     
-    df = pd.DataFrame(processed_data)
-    df.to_csv('article_summaries.csv', index=False)
-    return df
+    return processed_data
 
-def generate_markdown_newsletter(df, num_long_summaries, num_short_summaries):
+def update_items_from_articles(articles):
+    current_date = datetime.now().date()
+    for article in articles:
+        items.upsert({
+            'id': hash(article['url']),  # Use a hash of the URL as a unique identifier
+            'title': article['title'],
+            'url': article['url'],
+            'content': article['content'],
+            'long_summary': article['long_summary'],
+            'short_summary': article['short_summary'],
+            'interest_score': article['interest_score'],
+            'added_date': current_date.strftime('%Y-%m-%d')
+        })
+    set_last_update_date(current_date)
+    generate_newsletter_summary()
+
+def generate_markdown_newsletter(num_long_summaries, num_short_summaries):
+    df = pd.DataFrame(items())
     df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
     
     markdown_content = f"*This newsletter summarises articles that have been read and shared by i.AI in the past 14 days. Generated with help from Anthropic Haiku on {datetime.now().strftime('%Y-%m-%d')}*\n\n"
@@ -150,16 +265,45 @@ def generate_markdown_newsletter(df, num_long_summaries, num_short_summaries):
     
     return markdown_content
 
-def generate_newsletter_summary(newsletter_content):
+#TODO REMOVE
+'''def generate_newsletter_summary():
     client = anthropic.Anthropic()
+    
+    # Query the database for relevant articles
+    df = pd.DataFrame(items())
+    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+    
+    # Prepare the content for the summary
+    articles_content = ""
+    for _, article in df_sorted.iterrows():
+        articles_content += f"Title: {article['title']}\n"
+        articles_content += f"URL: {article['url']}\n"
+        articles_content += f"Summary: {article['long_summary']}\n\n"
+
     prompt = f"""
     You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
-    Here is the content of this week's newsletter:
-    <newsletter>
-    {newsletter_content}  # Truncate to avoid token limits
-    </newsletter>
+    Here are the articles for this week's newsletter:
+    <articles>
+    {articles_content[:3000]}  # Truncate to avoid token limits
+    </articles>
 
-    To create an effective summary, please follow these steps:\n\n1. Carefully read through the entire newsletter content.\n2. Identify the 3-5 most important and interesting articles, news items, or announcements.\n3. Focus on information that would be most relevant and appealing to the newsletter's audience.\n4. Condense the key points into a brief summary, keeping it between 4-7 lines long.\n5. Ensure your summary is factual while also sounding exciting and inspiring.\n6. Use language that engages the reader and encourages them to explore the full newsletter.\n7. Avoid using phrases like \"In this newsletter\" or \"This edition covers\" - instead, dive straight into the content.\n8. Make specific references to \"this week\" to emphasize the current nature of the information.\n\nYour summary should be written in a tone that is:\n- Professional yet approachable\n- Enthusiastic without being overly promotional\n- Informative and concise\n\nPlease provide your summary within <summary> tags. Remember to keep it between 3-5 lines long, focusing on the most notable and exciting elements of this week's newsletter."
+    To create an effective summary, please follow these steps:
+
+    1. Carefully read through the provided article information.
+    2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
+    3. Focus on information that would be most relevant and appealing to the newsletter's audience.
+    4. Condense the key points into a brief summary, keeping it between 4-7 lines long.
+    5. Ensure your summary is factual while also sounding exciting and inspiring.
+    6. Use language that engages the reader and encourages them to explore the full newsletter.
+    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
+    8. Make specific references to "this week" to emphasize the current nature of the information.
+
+    Your summary should be written in a tone that is:
+    - Professional yet approachable
+    - Enthusiastic without being overly promotional
+    - Informative and concise
+
+    Please provide your summary within <summary> tags. Remember to keep it between 3-5 lines long, focusing on the most notable and exciting elements of this week's newsletter.
     """
     
     try:
@@ -172,7 +316,7 @@ def generate_newsletter_summary(newsletter_content):
         return message.content[0].text
     except Exception as e:
         print(f"Error generating newsletter summary: {e}")
-        return ""
+        return ""'''
 
 
 def create_quarto_document(summary, content):
@@ -199,10 +343,19 @@ def render_quarto_to_html():
         print(f"Error rendering Quarto document: {e}")
 
 def create_newsletter(num_long_summaries=4, num_short_summaries=6):
-    df = process_articles()
-    newsletter_content = generate_markdown_newsletter(df, num_long_summaries, num_short_summaries)
+    last_update = get_last_update_date()
+    current_date = datetime.now().date()
+
+    if not last_update or (current_date - last_update) >= timedelta(days=14):
+        print("Fetching and processing new articles...")
+        articles = process_articles()
+        update_items_from_articles(articles)
+    else:
+        print("Using existing articles from database...")
+
+    newsletter_content = generate_markdown_newsletter(num_long_summaries, num_short_summaries)
     
-    summary = generate_newsletter_summary(newsletter_content)
+    summary = generate_newsletter_summary()
     summary = summary.replace('<summary>', '').replace('</summary>', '').strip()
     
     create_quarto_document(summary, newsletter_content)

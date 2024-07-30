@@ -9,3 +9,4 @@ limits
 python-dotenv
 pydantic
 pydantic-settings
+python-fasthtml
