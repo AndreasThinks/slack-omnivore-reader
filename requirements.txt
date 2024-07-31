@@ -12,3 +12,4 @@ pydantic-settings
 python-fasthtml
 pandas
 anthropic
+quarto-cli
