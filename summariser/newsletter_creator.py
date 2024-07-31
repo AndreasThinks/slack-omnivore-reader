@@ -27,12 +27,6 @@ comparisons = db.t.comparisons
 last_update = db.t.last_update
 newsletter_summaries = db.t.newsletter_summaries
 
-if items not in db.t:
-    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
-    comparisons.create(id=int, item1_id=int, item2_id=int, pk='id')
-    last_update.create(id=int, update_date=str, pk='id')
-    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
-
 def get_last_update_date():
     result = last_update(order_by='-id', limit=1)
     return datetime.strptime(result[0]['update_date'], '%Y-%m-%d').date() if result else None
@@ -311,4 +305,11 @@ def create_newsletter(num_long_summaries=4, num_short_summaries=6):
     print("Self-contained newsletter generated and saved as newsletter.html")
 
 if __name__ == "__main__":
+    create_newsletter()
+
+if items not in db.t:
+    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+    comparisons.create(id=int, item1_id=int, item2_id=int, pk='id')
+    last_update.create(id=int, update_date=str, pk='id')
+    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
     create_newsletter()
