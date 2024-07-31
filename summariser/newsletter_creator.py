@@ -110,7 +110,7 @@ def query_recent_omnivore_articles(days=14, limit=25):
         return []
 
 def generate_newsletter_summary():
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     
     # Query the database for relevant articles
     df = pd.DataFrame(items())
@@ -173,7 +173,7 @@ def generate_newsletter_summary():
         return ""
     
 def generate_article_summary(title, url, content):
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     prompt = f"""
     Analyze the following article and provide a summary in JSON format:
 
@@ -264,59 +264,6 @@ def generate_markdown_newsletter(num_long_summaries, num_short_summaries):
         markdown_content += f"- [{article['title']}]({article['url']})\n"
     
     return markdown_content
-
-#TODO REMOVE
-'''def generate_newsletter_summary():
-    client = anthropic.Anthropic()
-    
-    # Query the database for relevant articles
-    df = pd.DataFrame(items())
-    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
-    
-    # Prepare the content for the summary
-    articles_content = ""
-    for _, article in df_sorted.iterrows():
-        articles_content += f"Title: {article['title']}\n"
-        articles_content += f"URL: {article['url']}\n"
-        articles_content += f"Summary: {article['long_summary']}\n\n"
-
-    prompt = f"""
-    You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
-    Here are the articles for this week's newsletter:
-    <articles>
-    {articles_content[:3000]}  # Truncate to avoid token limits
-    </articles>
-
-    To create an effective summary, please follow these steps:
-
-    1. Carefully read through the provided article information.
-    2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
-    3. Focus on information that would be most relevant and appealing to the newsletter's audience.
-    4. Condense the key points into a brief summary, keeping it between 4-7 lines long.
-    5. Ensure your summary is factual while also sounding exciting and inspiring.
-    6. Use language that engages the reader and encourages them to explore the full newsletter.
-    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
-    8. Make specific references to "this week" to emphasize the current nature of the information.
-
-    Your summary should be written in a tone that is:
-    - Professional yet approachable
-    - Enthusiastic without being overly promotional
-    - Informative and concise
-
-    Please provide your summary within <summary> tags. Remember to keep it between 3-5 lines long, focusing on the most notable and exciting elements of this week's newsletter.
-    """
-    
-    try:
-        message = client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=1000,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return message.content[0].text
-    except Exception as e:
-        print(f"Error generating newsletter summary: {e}")
-        return ""'''
 
 
 def create_quarto_document(summary, content):
