@@ -1,1 +1,2 @@
-web: uvicorn main:fastapi_app --host=0.0.0.0 --port=$PORT
+worker: python summariser/newsletter_creator.py
+web: uvicorn app:app --host=0.0.0.0 --port=$PORT

@@ -1,0 +1,101 @@
+---
+title: "AI Newsletter"
+date: "2024-07-30"
+format:
+  html:
+    embed-resources: true
+    standalone: true
+    toc: true
+    toc-title: Contents
+    toc-location: left
+    theme: cosmo
+---
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h1, h2, h3 {
+    color: #2c3e50;
+}
+
+a {
+    color: #3498db;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+.summary {
+    background-color: #f8f9fa;
+    border-left: 4px solid #3498db;
+    padding: 10px;
+    margin-bottom: 20px;
+}
+
+.toc {
+    background-color: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+@media only screen and (max-width: 600px) {
+    body {
+        padding: 10px;
+    }
+}
+</style>
+
+<div class="summary">
+This week's newsletter delves into the cutting-edge world of AI, showcasing groundbreaking advancements that push the boundaries of what's possible. Discover how OpenAI's SearchGPT prototype combines AI models with web data to deliver fast, accurate answers, and learn about their innovative Rule-Based Rewards system for enhancing AI safety. Explore Apple's 4M model, a novel approach to multimodal learning that seamlessly integrates text, images, audio, and video. Plus, witness DeepMind's remarkable AI system that solves complex mathematical problems at a silver-medal level, demonstrating the incredible problem-solving capabilities of modern AI.
+</div>
+
+*This newsletter summarises articles that have been read and shared by i.AI in the past 14 days. Generated with help from Anthropic Haiku on 2024-07-30*
+
+## Featured Articles
+
+### [A Visual Guide to Quantization - by Maarten Grootendorst](https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-quantization)
+
+The article discusses the challenge of running large language models (LLMs) on consumer hardware due to their massive size, often exceeding billions of parameters. It introduces quantization as a key technique for compressing these models to make them more efficient. The article then goes on to provide a visual guide to the quantization process, explaining the concepts of full-precision, integer, and mixed-precision quantization in a clear and accessible way.
+
+### [SearchGPT is a prototype of new AI search features | OpenAI](https://openai.com/index/searchgpt-prototype/)
+
+OpenAI is testing a prototype called SearchGPT, which is designed to combine the strength of their AI models with information from the web to provide users with fast and timely answers, along with clear and relevant sources. This prototype is being launched to a small group of users and publishers to gather feedback, and the best features from this prototype will be integrated into ChatGPT in the future.
+
+### [Improving Model Safety Behavior with Rule-Based Rewards | OpenAI](https://openai.com/index/improving-model-safety-behavior-with-rule-based-rewards/)
+
+OpenAI has developed a new method using Rule-Based Rewards (RBRs) that significantly enhances the safety of their AI systems, making them safer and more reliable for people and developers to use. This is part of their work to explore more ways they can apply their own AI to make AI safer, which is an exciting development in the field of AI safety and reliability.
+
+### [4M: Massively Multimodal Masked Modeling - Apple Machine Learning Research](https://machinelearning.apple.com/research/massively-multimodal)
+
+The 4M model is a novel approach to multimodal learning that can effectively leverage a wide range of data modalities, including text, images, audio, and video. By using a masked modeling technique, the model is able to learn powerful representations that capture the relationships between different modalities, enabling it to perform well on a variety of downstream tasks. This research represents an exciting advancement in the field of multimodal AI and could have significant implications for a wide range of applications.
+
+## Quick Reads
+
+- **[AI achieves silver-medal standard solving International Mathematical Olympiad problems - Google DeepMind](https://deepmind.google/discover/blog/ai-solves-imo-problems-at-silver-medal-level/)**: DeepMind's AI system has achieved a silver-medal level performance on solving problems from the International Mathematical Olympiad, demonstrating its advanced problem-solving capabilities in the field of mathematics.
+
+- **[The Economic Case for Reimagining the State](https://www.institute.global/insights/economic-prosperity/the-economic-case-for-reimagining-the-state?tm_source=dynamics)**: The article discusses the economic case for reimagining the role of the state in the age of AI and technological innovation, arguing for a more proactive and adaptive approach to governance.
+
+- **[Evaluating language models for mathematics through interactions | PNAS](https://www.pnas.org/doi/abs/10.1073/pnas.2318124121)**: The article evaluates the performance of language models on mathematical reasoning tasks, finding that they can solve a variety of math problems but struggle with more complex reasoning.
+
+- **[Microsoft deal with AI startup to be investigated by UK competition watchdog | Technology sector | The Guardian](https://www.theguardian.com/business/article/2024/jul/16/microsoft-deal-with-ai-startup-to-be-investigated-by-uk-competition-watchdog)**: The UK's Competition and Markets Authority has launched a full investigation into Microsoft's deal with AI startup Inflection, which involves Microsoft hiring Inflection's founders and accessing its AI models.
+
+- **[Faith and Fate: Transformers as fuzzy pattern matchers – Answer.AI](https://www.answer.ai/posts/2024-07-25-transformers-as-matchers.html)**: The article discusses the limitations of Transformers as fuzzy pattern matchers, highlighting the insights from the paper 'Faith and Fate: Limits of Transformers on Compositionality'.
+
+- **[Mistral NeMo | Mistral AI | Frontier AI in your hands](https://mistral.ai/news/mistral-nemo/)**: Mistral NeMo is a state-of-the-art 12B language model with a 128k context length, developed in collaboration with NVIDIA and released under the Apache 2.0 license, providing frontier AI capabilities in a small and accessible package.
+
+## Also Worth Checking
+
+- [King's Speech 2024 background briefing final GOV.uk.docx](https://storage.googleapis.com/omnivore/u/195523cb-fc47-41c5-8573-bef3d20020b3/King_s_Speech_2024_background_briefing_GOV.uk.pdf?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=gke-app-internal-sa%40omnivore-production.iam.gserviceaccount.com%2F20240730%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20240730T200758Z&X-Goog-Expires=14400&X-Goog-SignedHeaders=host&X-Goog-Signature=3c43bb308899ee140e6114620a61bae0deddf5fa8616b5d1070604220afad4c47f61b0e31cc2ee66b75aa1029e153a32d42d1e0a2e57542f715348a19ca263904521f9b13208f373fae9f9470eebe8631a65ef72be812eb70a02f07b06f84c9628fe26e76de8fda97bec6b4aa5215e2e2b904b0d58dd68d0b8f7810b83bddbb9e1996f1d648f84b9d46fb290a740b8e3e96c7014eb5abb697ec159e1b635e9c1922018a1f78d51897efbbb2c8307ec41303e2169062ecfb0106480e2d52dea7ab1e5684eedfd3cd8922fdd51416b243b986690a322c414d939ff6ea415130bf7e42a935d483451217cace6f4137194452ba0d476ee71bb3eb28871c00075c953)
+- [An Open Course on LLMs, Led by Practitioners – Hamel's Blog](https://hamel.dev/blog/posts/course/)
+- [Win your fantasy league using operations research](https://www.alexmolas.com/2024/07/15/fantasy-knapsack.html)
+- [Splink 4.0.0 released - Splink](https://moj-analytical-services.github.io/splink/blog/2024/07/24/splink-400-released.html)
+- [Search for '31' | Ada Lovelace Institute](https://www.adalovelaceinstitute.org/blog/ai-public-sector-white-heat-hot-air/?s=31)
