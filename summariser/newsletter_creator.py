@@ -7,15 +7,7 @@ import anthropic
 import pandas as pd
 from tqdm import tqdm
 from dotenv import load_dotenv
-import requests
-import json
-from datetime import datetime, timedelta
-import os
-import pytz 
-import anthropic
-import pandas as pd
-from tqdm import tqdm
-from dotenv import load_dotenv
+
 import subprocess
 from fasthtml.common import database
 
@@ -26,6 +18,12 @@ items = db.t.items
 comparisons = db.t.comparisons
 last_update = db.t.last_update
 newsletter_summaries = db.t.newsletter_summaries
+
+if items not in db.t:
+    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+    comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
+    last_update.create(id=int, update_date=str, pk='id')
+    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
 
 def get_last_update_date():
     result = last_update(order_by='-id', limit=1)
@@ -166,8 +164,23 @@ def generate_newsletter_summary():
         print(f"Error generating or saving newsletter summary: {e}")
         return ""
     
-def generate_article_summary(title, url, content):
+def generate_article_summary(title, url, content, num_comparisons=4):
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    
+    comparison_data = comparisons(order_by='-id', limit=num_comparisons)
+    print(comparison_data)
+
+    comparison_examples = ""
+    if len(comparison_data) > 0:
+        for comparison in comparison_data:
+            winning_item = items[comparison['winning_id']]
+            losing_item = items[comparison['losing_id']]
+            comparison_examples += f"As an example, this article is better:\nTitle: {winning_item['title']}\n{winning_item['short_summary'][:100]}...\n\nThan this article:\nTitle: {losing_item['title']}\n{losing_item['short_summary'][:100]}...\n\n"
+    print('found comparisons')
+
+    comparison_intro = "Here are some examples of article comparisons to guide your interest scoring:\n" if comparison_examples else ""
+
+
     prompt = f"""
     Analyze the following article and provide a summary in JSON format:
 
@@ -177,7 +190,8 @@ def generate_article_summary(title, url, content):
     Content:
     {content[:1000]}  # Truncate content to avoid token limits
 
-    Make sure your interest score is based on London based AI engineers, who are technically savy, and want to focus on exciting AI developments.
+    {comparison_intro}{comparison_examples}
+    Make sure your interest score is based on London based AI engineers, who are technically savvy, and want to focus on exciting AI developments.
 
     Provide output in the following JSON format:
     {{
@@ -188,6 +202,8 @@ def generate_article_summary(title, url, content):
     """
     
     try:
+        print('Generating summary...')
+        print('Prompt:', prompt)
         message = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=1000,
@@ -305,11 +321,16 @@ def create_newsletter(num_long_summaries=4, num_short_summaries=6):
     print("Self-contained newsletter generated and saved as newsletter.html")
 
 if __name__ == "__main__":
+    if items not in db.t:
+        items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+        comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
+        last_update.create(id=int, update_date=str, pk='id')
+        newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
     create_newsletter()
 
 if items not in db.t:
     items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
-    comparisons.create(id=int, item1_id=int, item2_id=int, pk='id')
+    comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
     last_update.create(id=int, update_date=str, pk='id')
     newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
     create_newsletter()

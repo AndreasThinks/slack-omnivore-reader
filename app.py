@@ -1,5 +1,5 @@
 from fasthtml import FastHTML
-from fasthtml.common import Form, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
+from fasthtml.common import Form, SortableJS, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -99,51 +99,48 @@ pico_css = Style('''
         padding: 1rem;
         margin-bottom: 2rem;
     }
+    ul, ol {
+  list-style-type: none;
+    }
+    .sortable {
+  list-style-type: none;
+    }
 ''')
 
 
-sortable_js = Script('''
-    import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/modular/sortable.esm.js';
+class StoryCard:
+    def __init__(self, title, url, long_summary, short_summary, item_id):
+        self.title = title
+        self.url = url
+        self.long_summary = long_summary
+        self.short_summary = short_summary
+        self.item_id = item_id
 
-    const LONG_ITEM_COUNT = 4;
-    const SHORT_ITEM_COUNT = 6;
+    def render(self, format_type):
+        base_class = "item-card"
+        if format_type == "long":
+            base_class += " long-item"
+        elif format_type == "short":
+            base_class += " short-item"
+        else:  # link format
+            base_class += " link-item"
 
-    new Sortable(document.querySelector('.item-list'), {
-        animation: 150,
-        onEnd: function (evt) {
-            updateItemFormat();
-            
-            const itemIds = Array.from(document.querySelectorAll('.item-card'))
-                .map(card => card.getAttribute('data-id'));
-            
-            htmx.ajax('POST', '/reorder', {
-                target: '#reorder-result',
-                swap: 'innerHTML',
-                values: {ids: itemIds.join(',')}  // Join the array into a comma-separated string
-            });
-        }
-    });
+        return Li(
+            Article(
+                H3(A(self.title, href=self.url)),
+                P(self.long_summary, cls="long-summary"),
+                P(self.short_summary, cls="short-summary"),
+                Footer(A("Read more", href=self.url, cls="secondary read-more")),
+                Hidden(id="id", value=self.item_id),
+                cls=base_class,
+            )
+        )
 
-    function updateItemFormat() {
-        const allItems = document.querySelectorAll('.item-card');
-        allItems.forEach((item, index) => {
-            item.classList.remove('long-item', 'short-item', 'link-item');
-            if (index < LONG_ITEM_COUNT) {
-                item.classList.add('long-item');
-            } else if (index < LONG_ITEM_COUNT + SHORT_ITEM_COUNT) {
-                item.classList.add('short-item');
-            } else {
-                item.classList.add('link-item');
-            }
-        });
-    }
 
-    // Initial format update
-    updateItemFormat();
-''', type='module')
+app = FastHTML(hdrs=(picolink, pico_css, SortableJS('.sortable'),))
 
-app = FastHTML(hdrs=(picolink, pico_css, sortable_js))
-
+LONG_ITEM_COUNT = 3
+SHORT_ITEM_COUNT = 4
 
 @app.get("/")
 def home():
@@ -159,39 +156,14 @@ def home():
     df = pd.DataFrame(items())
     df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
 
-    LONG_ITEM_COUNT = 3
-    SHORT_ITEM_COUNT = 4
+    item_cards = []
+    for i, row in df_sorted.iterrows():
+        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
+        format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
+        item_cards.append(card.render(format_type))
 
-    def create_item_card(title, url, long_summary, short_summary, index, item_id):
-        class_name = "item-card"
-        if index < LONG_ITEM_COUNT:
-            class_name += " long-item"
-        elif index < LONG_ITEM_COUNT + SHORT_ITEM_COUNT:
-            class_name += " short-item"
-        else:
-            class_name += " link-item"
-
-        return Li(
-            Article(
-                H3(A(title, href=url)),
-                P(long_summary, cls="long-summary"),
-                P(short_summary, cls="short-summary"),
-                Footer(A("Read more", href=url, cls="secondary read-more")),
-                cls=class_name,
-                **{"data-id": item_id}
-            )
-        )
-
-    item_cards = [
-        create_item_card(
-            row['title'],
-            row['url'],
-            row['long_summary'],
-            row['short_summary'],
-            i,
-            row['id']
-        ) for i, row in df_sorted.iterrows()
-    ]
+    card_container = Form(*item_cards,
+               id='story-container', cls='sortable', hx_trigger="end", hx_post="/reorder", hx_swap="innerHTML", hx_target="#story-container")
 
     # Get the latest newsletter summary
     latest_summary = newsletter_summaries(order_by='-date', limit=1)
@@ -200,13 +172,9 @@ def home():
     page = Titled('Bedtime Reading',
         Main(
             Div(
-                Div(
                     P(f"Last updated on: {last_update.strftime('%Y-%m-%d') if last_update else 'Never'}", cls="last-updated"),
                     Div(summary_content, cls="newsletter-summary"),
-                    Ul(*item_cards, cls="item-list"),
-                    Div(id="reorder-result"),  # Add this line to handle HTMX updates
-                    cls="items-container"
-                ),
+                    card_container, 
                 cls="container"
             )
         )
@@ -219,26 +187,48 @@ async def update():
     current_date = datetime.now().date()
     update_items_from_articles()
     last_update.update({'date': current_date})
-    return JSONResponse(content={"message": "Update completed successfully", "last_update": str(current_date)})
 
 @app.post("/reorder")
-async def reorder(request: Request, ids: str = Form(...)):
-    new_order = ids.split(',')
-    
-    # Create comparison pairs
-    for i, item_id in enumerate(new_order):
-        for j in range(i+1, len(new_order)):
-            comparisons.insert({
-                'item1_id': int(item_id),
-                'item2_id': int(new_order[j])
-            })
-    
-    # Update interest scores
-    for i, item_id in enumerate(new_order):
-        items.update({'interest_score': len(new_order) - i}, int(item_id))
-    
-    return JSONResponse(content={"status": "success"})
+async def reorder(request: Request):
+    form_data = await request.form()
+    ids = form_data.getlist("id")
 
+    new_order = ids
+
+    df = pd.DataFrame(items())
+    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+
+    # Get the original order of items
+    original_order = df_sorted['id'].tolist()
+    
+    # Record comparisons
+    for new_index, item_id in enumerate(new_order):
+        item_id = int(item_id)
+        old_index = original_order.index(item_id)
+        
+        if new_index < old_index:
+            # This item has moved up in the ranking
+            for losing_id in original_order[new_index:old_index]:
+                if losing_id != item_id:
+                    comparisons.insert({
+                        'winning_id': item_id,
+                        'losing_id': losing_id
+                    })
+
+    # Reorder items based on new order
+    reordered_items = []
+    for item_id in new_order:
+        item = df_sorted[df_sorted['id'] == int(item_id)].iloc[0]
+        reordered_items.append(item)
+
+    # Render the reordered items
+    item_cards = []
+    for i, row in enumerate(reordered_items):
+        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
+        format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
+        item_cards.append(card.render(format_type))
+
+    return Li(*item_cards)
 
 @app.post("/slack/events")
 async def slack_events(req: Request):
