@@ -9,47 +9,40 @@ import time
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+class EventDeduplicator:
+    def __init__(self):
+        self.processed_events = {}
+
+    def deduplicate(self, ttl=60):
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(event, say, client):
+                event_key = f"{event['event_ts']}:{event['item']['channel']}:{event['item']['ts']}"
+                current_time = time.time()
+
+                if event_key in self.processed_events:
+                    if current_time - self.processed_events[event_key] < ttl:
+                        logger.info(f"Duplicate event detected, skipping: {event_key}")
+                        return
+
+                self.processed_events[event_key] = current_time
+                self.processed_events = {k: v for k, v in self.processed_events.items() if current_time - v < ttl}
+
+                return await func(event, say, client)
+            return wrapper
+        return decorator
+
 app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
     signing_secret=settings.SLACK_SIGNING_SECRET
 )
-
 omnivore_client = OmnivoreClient(settings.OMNIVORE_API_KEY)
 trigger_emojis = get_trigger_emojis()
-
-# In-memory store for processed events
-processed_events = {}
-
-def deduplicate(ttl=60):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(event, say, client):
-            # Create a unique key for this event
-            event_key = f"{event['event_ts']}:{event['item']['channel']}:{event['item']['ts']}"
-            
-            current_time = time.time()
-            
-            # Check if we've already processed this event and it's not expired
-            if event_key in processed_events:
-                if current_time - processed_events[event_key] < ttl:
-                    logger.info(f"Duplicate event detected, skipping: {event_key}")
-                    return
-            
-            # Store the current time for this event
-            processed_events[event_key] = current_time
-            
-            # Clean up expired entries
-            processed_events = {k: v for k, v in processed_events.items() if current_time - v < ttl}
-            
-            # Call the original function
-            return await func(event, say, client)
-        return wrapper
-    return decorator
+deduplicator = EventDeduplicator()
 
 @app.event("reaction_added")
-@deduplicate(ttl=60)  # Set TTL to 60 seconds
+@deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds
 async def handle_reaction(event, say, client):
-    # Your existing handler code here
     if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
         return
     channel_id = event["item"]["channel"]
@@ -61,11 +54,9 @@ async def handle_reaction(event, say, client):
             limit=1,
             inclusive=True
         )
-        
         if result.data.get("messages"):
             message = result.data["messages"][0]
             url = extract_and_validate_url(message)
-            
             if url:
                 # First, check if the URL already exists
                 url_exists = await omnivore_client.search_url(url)
