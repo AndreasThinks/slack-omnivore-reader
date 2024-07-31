@@ -10,3 +10,4 @@ python-dotenv
 pydantic
 pydantic-settings
 python-fasthtml
+pandas
