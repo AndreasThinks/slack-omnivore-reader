@@ -9,7 +9,7 @@ from limits import parse_many
 import pandas as pd
 from datetime import datetime, timedelta
 
-from summariser.newsletter_creator import update_items_from_articles, get_last_update_date
+from summariser.newsletter_creator import update_items_from_articles, get_last_update_date, db
 from config import settings
 from slack_handlers import app as slack_app
 from utils import setup_rate_limiter, setup_logging
@@ -21,16 +21,11 @@ limiter = setup_rate_limiter()
 rate_limits = parse_many(settings.RATE_LIMIT)
 handler = AsyncSlackRequestHandler(slack_app)
 
-# Set up SQLite database
-db = database('data/items.db')
+
 items = db.t.items
 comparisons = db.t.comparisons
 last_update = db.t.last_update
 newsletter_summaries = db.t.newsletter_summaries
-
-# if there are no items in the database, create the table
-if not items.exists():
-    update_items_from_articles()
 
 
 pico_css = Style('''

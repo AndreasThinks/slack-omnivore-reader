@@ -3,6 +3,8 @@ from slack_bolt.async_app import AsyncApp
 from config import settings
 from omnivore_client import OmnivoreClient
 from utils import extract_and_validate_url, get_trigger_emojis
+from functools import wraps
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -15,14 +17,43 @@ app = AsyncApp(
 omnivore_client = OmnivoreClient(settings.OMNIVORE_API_KEY)
 trigger_emojis = get_trigger_emojis()
 
+# In-memory store for processed events
+processed_events = {}
+
+def deduplicate(ttl=60):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(event, say, client):
+            # Create a unique key for this event
+            event_key = f"{event['event_ts']}:{event['item']['channel']}:{event['item']['ts']}"
+            
+            current_time = time.time()
+            
+            # Check if we've already processed this event and it's not expired
+            if event_key in processed_events:
+                if current_time - processed_events[event_key] < ttl:
+                    logger.info(f"Duplicate event detected, skipping: {event_key}")
+                    return
+            
+            # Store the current time for this event
+            processed_events[event_key] = current_time
+            
+            # Clean up expired entries
+            processed_events = {k: v for k, v in processed_events.items() if current_time - v < ttl}
+            
+            # Call the original function
+            return await func(event, say, client)
+        return wrapper
+    return decorator
+
 @app.event("reaction_added")
+@deduplicate(ttl=60)  # Set TTL to 60 seconds
 async def handle_reaction(event, say, client):
+    # Your existing handler code here
     if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
         return
-
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
-    
     try:
         result = await client.conversations_history(
             channel=channel_id,
