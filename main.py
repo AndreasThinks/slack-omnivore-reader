@@ -159,7 +159,7 @@ def home():
     if not last_update or (current_date - last_update) >= timedelta(days=7):
         if current_date.weekday() == 4:  # 4 represents Friday (0 is Monday, 6 is Sunday)
             print("Updating items from Omnivore...")
-            update_items_from_articles()
+            create_newsletter()
             last_update = current_date
 
     try:
@@ -185,7 +185,8 @@ def home():
     latest_summary = newsletter_summaries(order_by='-date', limit=1)
     summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
 
-    page = (Img(src=f"/header.png", id=f'header-image'),
+    page = (Title('Bedtime Reading'),
+            Img(src=f"/header.png", id=f'header-image'),
         Main(
             Div(
                     P(f"Last updated on: {last_update.strftime('%Y-%m-%d') if last_update else 'Never'}", cls="last-updated"),
@@ -201,7 +202,6 @@ def home():
 @app.post("/update")
 async def update():
     current_date = datetime.now().date()
-    update_items_from_articles()
     last_update.update({'date': current_date})
 
 @app.post("/reorder")

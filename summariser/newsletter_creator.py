@@ -303,7 +303,16 @@ def create_newsletter(num_long_summaries=4, num_short_summaries=6):
     last_update = get_last_update_date()
     current_date = datetime.now().date()
 
+    try:
+        df = pd.DataFrame(items())
+        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+    except KeyError:
+        print("No items found in the database")
+        articles = process_articles()
+        update_items_from_articles(articles)
+
     if not last_update or (current_date - last_update) >= timedelta(days=14):
+        print('time for DB update)')
         print("Fetching and processing new articles...")
         articles = process_articles()
         update_items_from_articles(articles)
