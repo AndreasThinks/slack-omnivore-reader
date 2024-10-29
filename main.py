@@ -1,5 +1,5 @@
 from fasthtml import FastHTML
-from fasthtml.common import fast_app, NotStr, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
+from fasthtml.common import fast_app, NotStr, Form, Head, Button, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -154,7 +154,7 @@ pico_css = Style('''
         border: 1px solid #d1d5db;
         border-radius: 0.5rem;
         padding: 1rem;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
     }
     ul, ol {
         list-style-type: none !important;
@@ -189,7 +189,6 @@ pico_css = Style('''
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 2rem;
         padding: 0.75rem 0;
     }
     .last-updated {
@@ -209,9 +208,32 @@ pico_css = Style('''
         font-size: 0.875rem;
         margin-left: 1rem;
         transition: all 0.2s ease;
+        position: relative;
     }
     .refresh-btn:hover {
         background-color: #059669;
+    }
+    .refresh-btn.htmx-request {
+        pointer-events: none;
+        opacity: 0.7;
+    }
+    .refresh-btn.htmx-request::after {
+        content: "";
+        position: absolute;
+        width: 1em;
+        height: 1em;
+        top: 50%;
+        right: 0.5rem;
+        transform: translateY(-50%);
+        border: 2px solid transparent;
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        to {
+            transform: translateY(-50%) rotate(360deg);
+        }
     }
 ''')
 
@@ -302,7 +324,12 @@ def home():
     # Add download button for newsletter and refresh button
     buttons = Div(
         A("Download Newsletter", href="/download-newsletter", cls="download-btn"),
-        A("Refresh Articles", href="/refresh", cls="refresh-btn"),
+        Button("Refresh Articles", 
+               cls="refresh-btn",
+               hx_post="/refresh",
+               hx_target="#story-container",
+               hx_swap="innerHTML",
+               hx_indicator=".refresh-btn"),
         style="display: flex; align-items: center;"
     )
 
@@ -324,7 +351,7 @@ def home():
 
     return page
 
-@app.get("/refresh")
+@app.post("/refresh")
 async def refresh_articles():
     """Force a refresh of articles and their scores."""
     try:
@@ -332,7 +359,18 @@ async def refresh_articles():
         articles = process_articles()
         update_items_from_articles(articles)
         logger.info("Manual refresh completed successfully")
-        return JSONResponse({"status": "success", "message": "Articles refreshed successfully"})
+        
+        # Return just the updated story container content
+        df = pd.DataFrame(items())
+        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        
+        item_cards = []
+        for i, row in df_sorted.iterrows():
+            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+            format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
+            item_cards.append(card.render(format_type))
+        
+        return Ul(*item_cards, id='story-container')
     except Exception as e:
         logger.error(f"Error during manual refresh: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error refreshing articles")
