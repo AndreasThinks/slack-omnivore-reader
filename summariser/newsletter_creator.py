@@ -16,6 +16,7 @@ from config import settings
 minimum_item_count = settings.MINIMUM_ITEM_COUNT
 maximum_item_count = settings.MAXIMUM_ITEM_COUNT
 days_to_check = settings.MIN_DAYS_TO_CHECK
+maximum_days_to_check = settings.MAXIMUM_DAYS_TO_CHECK
 EXAMPLE_SCORES_COUNT = 5  # Number of recent scores to include as examples
 
 load_dotenv()
@@ -89,7 +90,8 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
     }
     """
     
-    variables = {"after": None, "first": limit * 2}  # Request more than needed to ensure we have enough after date filtering
+    # Request more than needed to ensure we have enough after filtering
+    variables = {"after": None, "first": maximum_item_count * 2}
     headers = {"Content-Type": "application/json", "Authorization": api_token}
     
     try:
@@ -120,29 +122,48 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
         ]
         
         # If we don't have enough articles, gradually increase the date range
-        while len(filtered_articles) < minimum_item_count and initial_days < 365:  # Cap at 1 year
-            initial_days += days_to_check
-            cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+        current_days = initial_days
+        while len(filtered_articles) < minimum_item_count and current_days < maximum_days_to_check:
+            current_days += days_to_check
+            cutoff_date = datetime.now(pytz.utc) - timedelta(days=current_days)
             filtered_articles = [
                 article for article in articles
                 if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
             ]
             
             # If we've gone through all available articles and still don't have enough,
-            # just return what we have
-            if len(filtered_articles) == len(articles):
-                break
+            # make another API call with a larger limit
+            if len(filtered_articles) < minimum_item_count and len(filtered_articles) == len(articles):
+                variables["first"] = variables["first"] * 2  # Double the number of articles requested
+                response = requests.post(url, json={"query": query, "variables": variables}, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                articles = [
+                    {
+                        "title": article['node']['title'],
+                        "url": article['node']['url'],
+                        "content": article['node']['content'],
+                        "saved_at": article['node']['savedAt']
+                    }
+                    for article in data['data']['search']['edges']
+                ]
+                articles.sort(key=lambda x: x['saved_at'], reverse=True)
+                
+                filtered_articles = [
+                    article for article in articles
+                    if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
+                ]
+        
+        # If we still don't have enough articles after reaching maximum_days_to_check,
+        # just take the most recent ones we have
+        if len(filtered_articles) < minimum_item_count:
+            filtered_articles = articles[:minimum_item_count]
         
         # Limit to maximum_item_count while keeping the most recent articles
         filtered_articles = filtered_articles[:maximum_item_count]
         
-        # Convert back to the expected format
-        return [{
-            "title": article['title'],
-            "url": article['url'],
-            "content": article['content'],
-            "saved_at": article['saved_at']
-        } for article in filtered_articles]
+        return filtered_articles
         
     except requests.RequestException as e:
         print(f"Error querying Omnivore API: {e}")
@@ -320,7 +341,7 @@ def generate_markdown_newsletter(num_long_summaries=None, num_short_summaries=No
     df = pd.DataFrame(items())
     df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
     
-    markdown_content = f"*This newsletter summarises articles that have been read and shared by i.AI in the past 14 days. Generated with help from Anthropic Haiku on {datetime.now().strftime('%Y-%m-%d')}*\n\n"
+    markdown_content = f"*This newsletter summarises articles that have been read and shared by i.AI in the past {days_to_check} days. Generated with help from Anthropic Haiku on {datetime.now().strftime('%Y-%m-%d')}*\n\n"
     
     markdown_content += "## Featured Articles\n\n"
     for i in range(min(num_long_summaries, len(df_sorted))):
@@ -405,4 +426,3 @@ if __name__ == "__main__":
         comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
         last_update.create(id=int, update_date=str, pk='id')
         newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
-    create_newsletter()
