@@ -62,132 +62,113 @@ def update_items_from_csv():
         })
     set_last_update_date(datetime.now().date())
 
-def query_recent_omnivore_articles(initial_days=None, limit=None):
-    api_token = os.getenv("OMNIVORE_API_KEY")
-    url = "https://api-prod.omnivore.app/api/graphql"
+def query_recent_readwise_articles(initial_days=None, limit=None):
+    api_token = os.getenv("READWISE_API_KEY")
+    base_url = "https://readwise.io/api/v3/list/"
     
     if initial_days is None:
         initial_days = days_to_check
     if limit is None:
         limit = maximum_item_count
     
-    query = """
-    query RecentArticles($after: String, $first: Int) {
-        search(after: $after, first: $first, query: "", includeContent: true) {
-            ... on SearchSuccess {
-                edges {
-                    node {
-                        id
-                        title
-                        savedAt
-                        url
-                        content
-                    }
-                }
-                pageInfo {
-                    hasNextPage
-                    endCursor
-                }
-            }
-            ... on SearchError {
-                errorCodes
-            }
-        }
+    headers = {
+        "Authorization": f"Token {api_token}",
+        "Content-Type": "application/json"
     }
-    """
-    
-    variables = {"after": None, "first": limit * 2}  # Request more than needed to ensure we have enough after filtering
-    headers = {"Content-Type": "application/json", "Authorization": api_token}
     
     try:
         # Get existing URLs to avoid duplicates
         existing_urls = get_existing_urls()
         
-        response = requests.post(url, json={"query": query, "variables": variables}, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        
+        # Calculate cutoff date
         cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+        cutoff_date_str = cutoff_date.isoformat()
         
-        # Get all articles with their saved dates, excluding ones we already have
-        articles = [
-            {
-                "title": article['node']['title'],
-                "url": article['node']['url'],
-                "content": article['node']['content'],
-                "saved_at": article['node']['savedAt']  # Keep the ISO format string from Omnivore
+        articles = []
+        next_page_cursor = None
+        
+        while True:
+            params = {
+                'updatedAfter': cutoff_date_str,
+                'location': 'new'  # Get articles from the "new" location
             }
-            for article in data['data']['search']['edges']
-            if article['node']['url'] not in existing_urls
-        ]
+            
+            if next_page_cursor:
+                params['pageCursor'] = next_page_cursor
+            
+            response = requests.get(base_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Process articles from current page
+            for article in data['results']:
+                # Only include articles with our tag and exclude highlights
+                if (settings.DOCUMENT_TAG in article.get('tags', []) and 
+                    article['url'] not in existing_urls and 
+                    article.get('category') != 'highlight'):
+                    articles.append({
+                        "title": article['title'],
+                        "url": article['url'],
+                        "content": article.get('text', ''),  # Use text field if available
+                        "saved_at": article['saved_at']
+                    })
+            
+            # Check if we have enough articles or if there are no more pages
+            if len(articles) >= limit or not data.get('nextPageCursor'):
+                break
+                
+            next_page_cursor = data['nextPageCursor']
         
-        if not articles:
-            print("No new articles found that aren't already in the database.")
-            return []
+        # If we don't have enough articles, gradually increase the date range
+        current_days = initial_days
+        while len(articles) < minimum_item_count and current_days < maximum_days_to_check:
+            current_days += days_to_check
+            cutoff_date = datetime.now(pytz.utc) - timedelta(days=current_days)
+            cutoff_date_str = cutoff_date.isoformat()
+            
+            params = {
+                'updatedAfter': cutoff_date_str,
+                'location': 'new'
+            }
+            
+            response = requests.get(base_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            for article in data['results']:
+                # Only include articles with our tag and exclude highlights
+                if (settings.DOCUMENT_TAG in article.get('tags', []) and 
+                    article['url'] not in existing_urls and 
+                    article.get('category') != 'highlight'):
+                    articles.append({
+                        "title": article['title'],
+                        "url": article['url'],
+                        "content": article.get('text', ''),
+                        "saved_at": article['saved_at']
+                    })
+                
+                if len(articles) >= limit:
+                    break
+            
+            if not data.get('nextPageCursor'):
+                break
+        
+        # If we still don't have enough articles after reaching maximum_days_to_check,
+        # just take what we have
+        if len(articles) < minimum_item_count:
+            print(f"Warning: Only found {len(articles)} new articles")
+            return articles
         
         # Sort articles by date, newest first
         articles.sort(key=lambda x: x['saved_at'], reverse=True)
         
-        # First try to get articles within the initial days period
-        filtered_articles = [
-            article for article in articles
-            if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
-        ]
-        
-        # If we don't have enough articles, gradually increase the date range
-        current_days = initial_days
-        while len(filtered_articles) < minimum_item_count and current_days < maximum_days_to_check:
-            current_days += days_to_check
-            cutoff_date = datetime.now(pytz.utc) - timedelta(days=current_days)
-            filtered_articles = [
-                article for article in articles
-                if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
-            ]
-            
-            # If we've gone through all available articles and still don't have enough,
-            # make another API call with a larger limit
-            if len(filtered_articles) < minimum_item_count and len(filtered_articles) == len(articles):
-                variables["first"] = variables["first"] * 2  # Double the number of articles requested
-                response = requests.post(url, json={"query": query, "variables": variables}, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                
-                # Get new articles, still excluding ones we already have
-                new_articles = [
-                    {
-                        "title": article['node']['title'],
-                        "url": article['node']['url'],
-                        "content": article['node']['content'],
-                        "saved_at": article['node']['savedAt']  # Keep the ISO format string from Omnivore
-                    }
-                    for article in data['data']['search']['edges']
-                    if article['node']['url'] not in existing_urls
-                ]
-                
-                if not new_articles:
-                    break
-                
-                articles.extend(new_articles)
-                articles.sort(key=lambda x: x['saved_at'], reverse=True)
-                
-                filtered_articles = [
-                    article for article in articles
-                    if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
-                ]
-        
-        # If we still don't have enough new articles after reaching maximum_days_to_check,
-        # just take what we have
-        if len(filtered_articles) < minimum_item_count:
-            print(f"Warning: Only found {len(filtered_articles)} new articles")
-            return filtered_articles
-        
         # Limit to maximum_item_count while keeping the most recent articles
-        return filtered_articles[:maximum_item_count]
+        return articles[:maximum_item_count]
         
     except requests.RequestException as e:
-        print(f"Error querying Omnivore API: {e}")
+        print(f"Error querying Readwise API: {e}")
         return []
-    
+
 def generate_article_summary(title, url, content, num_comparisons=4):
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     
@@ -250,7 +231,6 @@ def generate_article_summary(title, url, content, num_comparisons=4):
     except Exception as e:
         print(f"Error generating summary for {title}: {e}")
         return None
-
 
 def generate_newsletter_summary():
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -315,9 +295,8 @@ def generate_newsletter_summary():
         print(f"Error generating or saving newsletter summary: {e}")
         return ""
 
-
 def process_articles():
-    articles = query_recent_omnivore_articles()
+    articles = query_recent_readwise_articles()
     if not articles:
         print("No new articles to process")
         return []
@@ -334,7 +313,7 @@ def process_articles():
                 'interest_score': summary['interest_score'],
                 'short_summary': summary['short_summary'],
                 'long_summary': summary['long_summary'],
-                'saved_at': article['saved_at']  # Use the original savedAt from Omnivore
+                'saved_at': article['saved_at']
             })
     
     return processed_data
@@ -353,11 +332,10 @@ def update_items_from_articles(articles):
             'long_summary': article['long_summary'],
             'short_summary': article['short_summary'],
             'interest_score': article['interest_score'],
-            'saved_at': article['saved_at']  # Use the original savedAt from Omnivore
+            'saved_at': article['saved_at']
         })
     set_last_update_date(datetime.now().date())
     generate_newsletter_summary()
-
 
 def generate_markdown_newsletter(num_long_summaries=None, num_short_summaries=None):
     if num_long_summaries is None:

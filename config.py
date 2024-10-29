@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000)
     SLACK_BOT_TOKEN: str = Field(default="default_token")
     SLACK_SIGNING_SECRET: str = Field(default="default_secret")
-    OMNIVORE_API_KEY: str = Field(default="default_api_key")
-    OMNIVORE_LABEL: str = Field(default="slack-import")
+    READWISE_API_KEY: str = Field(default="default_api_key")
+    DOCUMENT_TAG: str = Field(default="slack-import")  # Tag for imported documents
     RATE_LIMIT_PER_MINUTE: int = Field(default=20)
     LOG_LEVEL: str = Field(default="INFO")
     TRIGGER_EMOJIS: Optional[str] = None  # New setting for trigger emojis

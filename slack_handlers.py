@@ -1,7 +1,7 @@
 import logging
 from slack_bolt.async_app import AsyncApp
 from config import settings
-from omnivore_client import OmnivoreClient
+import requests
 from utils import extract_and_validate_url, get_trigger_emojis
 from functools import wraps
 import time
@@ -36,9 +36,48 @@ app = AsyncApp(
     token=settings.SLACK_BOT_TOKEN,
     signing_secret=settings.SLACK_SIGNING_SECRET
 )
-omnivore_client = OmnivoreClient(settings.OMNIVORE_API_KEY)
 trigger_emojis = get_trigger_emojis()
 deduplicator = EventDeduplicator()
+
+async def save_url_to_readwise(url: str) -> bool:
+    """Save a URL to Readwise Reader with the configured tag."""
+    try:
+        response = requests.post(
+            "https://readwise.io/api/v3/save/",
+            headers={
+                "Authorization": f"Token {settings.READWISE_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "url": url,
+                "tags": [settings.DOCUMENT_TAG],
+                "location": "new"  # Save to "new" items
+            }
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        logger.error(f"Error saving URL to Readwise: {str(e)}")
+        return False
+
+async def check_url_exists(url: str) -> bool:
+    """Check if a URL already exists in Readwise Reader."""
+    try:
+        response = requests.get(
+            "https://readwise.io/api/v3/list/",
+            headers={
+                "Authorization": f"Token {settings.READWISE_API_KEY}"
+            },
+            params={
+                "url": url
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        return len(data.get("results", [])) > 0
+    except requests.RequestException as e:
+        logger.error(f"Error checking URL in Readwise: {str(e)}")
+        return False
 
 @app.event("reaction_added")
 @deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds
@@ -59,26 +98,21 @@ async def handle_reaction(event, say, client):
             url = extract_and_validate_url(message)
             if url:
                 # First, check if the URL already exists
-                url_exists = await omnivore_client.search_url(url)
+                url_exists = await check_url_exists(url)
                 if url_exists:
-                    logger.info(f"URL already exists in Omnivore, skipping: {url}")
+                    logger.info(f"URL already exists in Readwise, skipping: {url}")
                     # No message is posted to Slack for duplicate URLs
                 else:
                     # If the URL doesn't exist, save it
-                    result = await omnivore_client.save_url(url)
-                    if result and "data" in result and "saveUrl" in result["data"]:
-                        saved_url = result["data"]["saveUrl"].get("url")
-                        if saved_url:
-                            reply_text = f"Saved URL to Omnivore with label '{settings.OMNIVORE_LABEL}': {saved_url}"
-                            await client.chat_postMessage(
-                                channel=channel_id,
-                                text=reply_text,
-                                thread_ts=message_ts
-                            )
-                        else:
-                            logger.warning(f"Attempted to save URL to Omnivore, but encountered an issue: {url}")
+                    if await save_url_to_readwise(url):
+                        reply_text = f"Saved URL to Readwise Reader with tag '{settings.DOCUMENT_TAG}': {url}"
+                        await client.chat_postMessage(
+                            channel=channel_id,
+                            text=reply_text,
+                            thread_ts=message_ts
+                        )
                     else:
-                        logger.error(f"Failed to save URL to Omnivore: {url}")
+                        logger.error(f"Failed to save URL to Readwise: {url}")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
