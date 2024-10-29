@@ -1,5 +1,5 @@
 from fasthtml import FastHTML
-from fasthtml.common import fast_app, Form, Head, Picture, SortableJS, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
+from fasthtml.common import fast_app, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -50,17 +50,23 @@ pico_css = Style('''
         align-items: center;
         gap: 1rem;
     }
-    .drag-handle {
-        cursor: move;
+    .vote-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-right: 1rem;
+    }
+    .vote-button {
+        cursor: pointer;
         padding: 0.25rem;
         color: #6B7280;
-        flex-shrink: 0;
-        display: inline-flex;
-        align-items: center;
-    }
-    .drag-handle::before {
-        content: "☰";
+        background: none;
+        border: none;
         font-size: 1.2em;
+        text-decoration: none;
+    }
+    .vote-button:hover {
+        color: #4B5563;
     }
     .item-list {
         list-style: none !important;
@@ -69,6 +75,13 @@ pico_css = Style('''
     }
     .item-list li {
         list-style-type: none !important;
+    }
+    #story-container {
+        list-style: none !important;
+        padding-left: 0 !important;
+    }
+    #story-container li {
+        list-style: none !important;
     }
     .long-item {
         padding: 1.5rem;
@@ -117,10 +130,8 @@ pico_css = Style('''
         margin-bottom: 2rem;
     }
     ul, ol {
-        list-style-type: none;
-    }
-    .sortable {
-        list-style-type: none;
+        list-style-type: none !important;
+        padding-left: 0 !important;
     }
     #header-image {
         display: block;
@@ -180,7 +191,11 @@ class StoryCard:
         return Li(
             Article(
                 Div(
-                    Div(cls="drag-handle"),
+                    Div(
+                        A("⬆️", href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/up", hx_target="#story-container", hx_swap="innerHTML"),
+                        A("⬇️", href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/down", hx_target="#story-container", hx_swap="innerHTML"),
+                        cls="vote-buttons"
+                    ),
                     H3(A(self.title, href=self.url), cls="card-title"),
                     cls="card-header"
                 ),
@@ -193,7 +208,7 @@ class StoryCard:
         )
 
 
-app, rt = fast_app(hdrs=(picolink, pico_css, SortableJS('.sortable'),), htmlkw={'data-theme': 'light'})
+app, rt = fast_app(hdrs=(picolink, pico_css), htmlkw={'data-theme': 'light'})
 
 LONG_ITEM_COUNT = 3
 SHORT_ITEM_COUNT = 4
@@ -225,8 +240,7 @@ def home():
         format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
         item_cards.append(card.render(format_type))
 
-    card_container = Form(*item_cards,
-               id='story-container', cls='sortable', hx_trigger="end", hx_post="/reorder", hx_swap="innerHTML", hx_target="#story-container")
+    card_container = Ul(*item_cards, id='story-container')
 
     # Get the latest newsletter summary
     latest_summary = newsletter_summaries(order_by='-date', limit=1)
@@ -274,47 +288,66 @@ async def update():
     current_date = datetime.now().date()
     last_update.update({'date': current_date})
 
-@app.post("/reorder")
-async def reorder(request: Request):
-    form_data = await request.form()
-    ids = form_data.getlist("id")
-
-    new_order = ids
-
-    df = pd.DataFrame(items())
-    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
-
-    # Get the original order of items
-    original_order = df_sorted['id'].tolist()
-    
-    # Record comparisons
-    for new_index, item_id in enumerate(new_order):
-        item_id = int(item_id)
-        old_index = original_order.index(item_id)
+@app.post("/vote/{id}/{direction}")
+async def vote(id: int, direction: str):
+    try:
+        # Get current item from database directly
+        current_item = items[id]
+        current_score = current_item.get('interest_score', 0)
         
-        if new_index < old_index:
-            # This item has moved up in the ranking
-            for losing_id in original_order[new_index:old_index]:
-                if losing_id != item_id:
-                    comparisons.insert({
-                        'winning_id': item_id,
-                        'losing_id': losing_id
-                    })
-
-    # Reorder items based on new order
-    reordered_items = []
-    for item_id in new_order:
-        item = df_sorted[df_sorted['id'] == int(item_id)].iloc[0]
-        reordered_items.append(item)
-
-    # Render the reordered items
-    item_cards = []
-    for i, row in enumerate(reordered_items):
-        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
-        format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
-        item_cards.append(card.render(format_type))
-
-    return Li(*item_cards)
+        # Get sorted list of items
+        df = pd.DataFrame(items())
+        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        
+        # Find current index
+        current_idx = df_sorted[df_sorted['id'] == id].index[0]
+        
+        # Calculate new index based on vote direction
+        new_idx = current_idx - 1 if direction == "up" else current_idx + 1
+        
+        # Ensure new index is within bounds
+        if 0 <= new_idx < len(df_sorted):
+            # Get the item we're swapping with
+            swap_id = int(df_sorted.iloc[new_idx]['id'])
+            swap_item = items[swap_id]
+            swap_score = swap_item.get('interest_score', 0)
+            
+            # Record the comparison based on vote direction
+            if direction == "up":
+                # Voting up means current item wins over the one above it
+                comparisons.insert({
+                    'winning_id': id,
+                    'losing_id': swap_id
+                })
+                # Update interest scores
+                items.update({'interest_score': current_score + 1}, id)
+                items.update({'interest_score': swap_score - 1}, swap_id)
+            else:
+                # Voting down means item below wins over current item
+                comparisons.insert({
+                    'winning_id': swap_id,
+                    'losing_id': id
+                })
+                # Update interest scores
+                items.update({'interest_score': current_score - 1}, id)
+                items.update({'interest_score': swap_score + 1}, swap_id)
+        
+        # Re-fetch and sort items
+        df = pd.DataFrame(items())
+        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        
+        # Render updated list
+        item_cards = []
+        for i, row in df_sorted.iterrows():
+            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
+            format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
+            item_cards.append(card.render(format_type))
+        
+        return Ul(*item_cards, id='story-container')
+    
+    except Exception as e:
+        logger.error(f"Error in vote endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error processing vote")
 
 @app.post("/slack/events")
 async def slack_events(req: Request):
