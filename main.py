@@ -1,5 +1,5 @@
 from fasthtml import FastHTML
-from fasthtml.common import fast_app, NotStr, Form, Head, Button, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
+from fasthtml.common import fast_app, NotStr, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script, Button
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -94,6 +94,7 @@ pico_css = Style('''
     .card-title a {
         display: inline-flex;
         align-items: center;
+        min-width: 150px;
     }
     .item-list {
         list-style: none !important;
@@ -154,7 +155,7 @@ pico_css = Style('''
         border: 1px solid #d1d5db;
         border-radius: 0.5rem;
         padding: 1rem;
-        margin-bottom: 1rem;
+        margin-bottom: 2rem;
     }
     ul, ol {
         list-style-type: none !important;
@@ -167,28 +168,11 @@ pico_css = Style('''
         max-width: 30%;
         height: auto;
     }
-    .download-btn {
-        display: inline-block;
-        padding: 0.5rem 1.2rem;
-        background-color: #4F46E5;
-        color: white;
-        text-decoration: none;
-        border-radius: 0.5rem;
-        font-size: 0.95rem;
-        font-weight: 500;
-        transition: all 0.2s ease;
-        border: none;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    }
-    .download-btn:hover {
-        background-color: #4338CA;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
     .header-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-bottom: 0.5rem;
         padding: 0.75rem 0;
     }
     .last-updated {
@@ -198,16 +182,34 @@ pico_css = Style('''
         color: #6B7280;
         font-size: 0.875rem;
         margin-top: 0.5rem;
+                 order: 2;
+    }
+    .action-btn {
+        display: inline-block;
+        padding: 0.5rem 1.2rem;
+        color: white;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        border: none;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        cursor: pointer;
+    }
+    .action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .download-btn {
+        background-color: #4F46E5;
+        margin-right: 1rem;
+    }
+    .download-btn:hover {
+        background-color: #4338CA;
     }
     .refresh-btn {
         background-color: #10B981;
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 0.375rem;
-        text-decoration: none;
-        font-size: 0.875rem;
-        margin-left: 1rem;
-        transition: all 0.2s ease;
         position: relative;
     }
     .refresh-btn:hover {
@@ -239,13 +241,15 @@ pico_css = Style('''
 
 
 class StoryCard:
-    def __init__(self, title, url, long_summary, short_summary, item_id, added_date):
+    def __init__(self, title, url, long_summary, short_summary, item_id, saved_at):
         self.title = title
         self.url = url
         self.long_summary = long_summary
         self.short_summary = short_summary
         self.item_id = item_id
-        self.added_date = datetime.strptime(added_date, '%Y-%m-%d').strftime('%B %d, %Y')
+        # Parse ISO format date and format it nicely
+        dt = datetime.fromisoformat(saved_at.replace('Z', '+00:00'))
+        self.saved_at = dt.strftime('%B %d, %Y at %I:%M %p')
 
     def render(self, format_type):
         base_class = "item-card"
@@ -274,7 +278,7 @@ class StoryCard:
                         cls="vote-buttons"
                     ),
                     H3(A(self.title, href=self.url), cls="card-title"),
-                    P(f"Added on {self.added_date}", cls="article-date"),
+                    P(f"Saved on {self.saved_at}", cls="article-date"),
                     cls="card-header"
                 ),
                 P(self.long_summary, cls="long-summary"),
@@ -323,9 +327,9 @@ def home():
 
     # Add download button for newsletter and refresh button
     buttons = Div(
-        A("Download Newsletter", href="/download-newsletter", cls="download-btn"),
+        A("Download Newsletter", href="/download-newsletter", cls="action-btn download-btn"),
         Button("Refresh Articles", 
-               cls="refresh-btn",
+               cls="action-btn refresh-btn",
                hx_post="/refresh",
                hx_target="#story-container",
                hx_swap="innerHTML",

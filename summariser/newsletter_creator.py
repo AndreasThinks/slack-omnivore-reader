@@ -15,7 +15,7 @@ from config import settings
 
 minimum_item_count = settings.MINIMUM_ITEM_COUNT
 maximum_item_count = settings.MAXIMUM_ITEM_COUNT
-days_to_check = settings.DAYS_TO_CHECK
+days_to_check = settings.MIN_DAYS_TO_CHECK
 EXAMPLE_SCORES_COUNT = 5  # Number of recent scores to include as examples
 
 load_dotenv()
@@ -27,7 +27,7 @@ last_update = db.t.last_update
 newsletter_summaries = db.t.newsletter_summaries
 
 if items not in db.t:
-    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, saved_at=str, pk='id')
     comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
     last_update.create(id=int, update_date=str, pk='id')
     newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
@@ -50,7 +50,8 @@ def update_items_from_csv():
             'long_summary': row['long_summary'],
             'short_summary': row['short_summary'],
             'interest_score': row['interest_score'],
-            'added_date': current_date.strftime('%Y-%m-%d')
+            'added_date': current_date.strftime('%Y-%m-%d'),
+            'saved_at': current_date.strftime('%Y-%m-%d')  # Default for CSV imports
         })
     set_last_update_date(current_date)
 
@@ -104,7 +105,7 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                 "title": article['node']['title'],
                 "url": article['node']['url'],
                 "content": article['node']['content'],
-                "saved_at": datetime.fromisoformat(article['node']['savedAt'].replace('Z', '+00:00'))
+                "saved_at": article['node']['savedAt']  # Keep the ISO format string
             }
             for article in data['data']['search']['edges']
         ]
@@ -115,7 +116,7 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
         # First try to get articles within the initial days period
         filtered_articles = [
             article for article in articles
-            if article['saved_at'] > cutoff_date
+            if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
         ]
         
         # If we don't have enough articles, gradually increase the date range
@@ -124,7 +125,7 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
             cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
             filtered_articles = [
                 article for article in articles
-                if article['saved_at'] > cutoff_date
+                if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
             ]
             
             # If we've gone through all available articles and still don't have enough,
@@ -139,7 +140,8 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
         return [{
             "title": article['title'],
             "url": article['url'],
-            "content": article['content']
+            "content": article['content'],
+            "saved_at": article['saved_at']
         } for article in filtered_articles]
         
     except requests.RequestException as e:
@@ -286,7 +288,8 @@ def process_articles():
                 'interest_score': summary['interest_score'],
                 'short_summary': summary['short_summary'],
                 'long_summary': summary['long_summary'],
-                'added_date': datetime.now().strftime('%Y-%m-%d')
+                'added_date': datetime.now().strftime('%Y-%m-%d'),
+                'saved_at': article['saved_at']
             })
     
     return processed_data
@@ -302,7 +305,8 @@ def update_items_from_articles(articles):
             'long_summary': article['long_summary'],
             'short_summary': article['short_summary'],
             'interest_score': article['interest_score'],
-            'added_date': current_date.strftime('%Y-%m-%d')
+            'added_date': current_date.strftime('%Y-%m-%d'),
+            'saved_at': article['saved_at']
         })
     set_last_update_date(current_date)
     generate_newsletter_summary()
@@ -397,7 +401,7 @@ def create_newsletter(num_long_summaries=None, num_short_summaries=None):
 
 if __name__ == "__main__":
     if items not in db.t:
-        items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
+        items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, saved_at=str, pk='id')
         comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
         last_update.create(id=int, update_date=str, pk='id')
         newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
