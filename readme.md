@@ -1,8 +1,8 @@
 # Slack Omnivore Integration
 
-This application integrates Slack with Omnivore, allowing you to save URLs shared in Slack to your Omnivore account.
+This application integrates Slack with Omnivore, allowing you to save URLs shared in Slack to your Omnivore account, along with a pretty front-end website.
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/AndreasThinks/slack-omnivore-reader)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/AzS2fY?referralCode=mOVLfw)
 
 ## Features
 - Saves URLs shared in Slack to Omnivore when specific emoji reactions are added
