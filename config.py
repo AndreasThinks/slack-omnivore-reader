@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     TRIGGER_EMOJIS: Optional[str] = None  # New setting for trigger emojis
     MINIMUM_ITEM_COUNT: int = Field(default=10)
     MAXIMUM_ITEM_COUNT: int = Field(default=20)  # Maximum number of articles to retrieve
+    NUMBER_OF_LONG_ARTICLES: int = Field(default=5)
+    NUMBER_OF_SHORT_ARTICLES: int = Field(default=5)
     DAYS_TO_CHECK: int = Field(default=14)
 
     @property

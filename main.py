@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-from summariser.newsletter_creator import get_last_update_date, db, create_newsletter
+from summariser.newsletter_creator import get_last_update_date, db, create_newsletter, process_articles, update_items_from_articles
 from config import settings
 from slack_handlers import app as slack_app
 from utils import setup_rate_limiter, setup_logging
@@ -195,16 +195,35 @@ pico_css = Style('''
     .last-updated {
         margin: 0;
     }
+    .article-date {
+        color: #6B7280;
+        font-size: 0.875rem;
+        margin-top: 0.5rem;
+    }
+    .refresh-btn {
+        background-color: #10B981;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        text-decoration: none;
+        font-size: 0.875rem;
+        margin-left: 1rem;
+        transition: all 0.2s ease;
+    }
+    .refresh-btn:hover {
+        background-color: #059669;
+    }
 ''')
 
 
 class StoryCard:
-    def __init__(self, title, url, long_summary, short_summary, item_id):
+    def __init__(self, title, url, long_summary, short_summary, item_id, added_date):
         self.title = title
         self.url = url
         self.long_summary = long_summary
         self.short_summary = short_summary
         self.item_id = item_id
+        self.added_date = datetime.strptime(added_date, '%Y-%m-%d').strftime('%B %d, %Y')
 
     def render(self, format_type):
         base_class = "item-card"
@@ -233,6 +252,7 @@ class StoryCard:
                         cls="vote-buttons"
                     ),
                     H3(A(self.title, href=self.url), cls="card-title"),
+                    P(f"Added on {self.added_date}", cls="article-date"),
                     cls="card-header"
                 ),
                 P(self.long_summary, cls="long-summary"),
@@ -245,9 +265,6 @@ class StoryCard:
 
 
 app, rt = fast_app(hdrs=(picolink, pico_css), htmlkw={'data-theme': 'light'})
-
-LONG_ITEM_COUNT = 3
-SHORT_ITEM_COUNT = 4
 
 @app.get("/")
 def home():
@@ -272,8 +289,8 @@ def home():
 
     item_cards = []
     for i, row in df_sorted.iterrows():
-        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
-        format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
+        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+        format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
         item_cards.append(card.render(format_type))
 
     card_container = Ul(*item_cards, id='story-container')
@@ -282,8 +299,12 @@ def home():
     latest_summary = newsletter_summaries(order_by='-date', limit=1)
     summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
 
-    # Add download button for newsletter
-    download_btn = A("Download Newsletter", href="/download-newsletter", cls="download-btn")
+    # Add download button for newsletter and refresh button
+    buttons = Div(
+        A("Download Newsletter", href="/download-newsletter", cls="download-btn"),
+        A("Refresh Articles", href="/refresh", cls="refresh-btn"),
+        style="display: flex; align-items: center;"
+    )
 
     page = (Title('Bedtime Reading'),
             Img(src=f"/header.png", id=f'header-image'),
@@ -291,7 +312,7 @@ def home():
             Div(
                     Div(
                         P(f"Last updated on: {last_update.strftime('%Y-%m-%d') if last_update else 'Never'}", cls="last-updated"),
-                        download_btn,
+                        buttons,
                         cls="header-row"
                     ),
                     Div(summary_content, cls="newsletter-summary"),
@@ -302,6 +323,19 @@ def home():
     )
 
     return page
+
+@app.get("/refresh")
+async def refresh_articles():
+    """Force a refresh of articles and their scores."""
+    try:
+        logger.info("Starting manual refresh of articles...")
+        articles = process_articles()
+        update_items_from_articles(articles)
+        logger.info("Manual refresh completed successfully")
+        return JSONResponse({"status": "success", "message": "Articles refreshed successfully"})
+    except Exception as e:
+        logger.error(f"Error during manual refresh: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error refreshing articles")
 
 @app.get("/download-newsletter")
 async def download_newsletter():
@@ -376,8 +410,8 @@ async def vote(id: int, direction: str):
         # Render updated list
         item_cards = []
         for i, row in df_sorted.iterrows():
-            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'])
-            format_type = "long" if i < LONG_ITEM_COUNT else "short" if i < LONG_ITEM_COUNT + SHORT_ITEM_COUNT else "link"
+            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+            format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
             item_cards.append(card.render(format_type))
         
         return Ul(*item_cards, id='story-container')
