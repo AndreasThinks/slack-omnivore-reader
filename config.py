@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO")
     TRIGGER_EMOJIS: Optional[str] = None  # New setting for trigger emojis
     MINIMUM_ITEM_COUNT: int = Field(default=10)
-    MAXIMUM_ITEM_COUNT: int = Field(default=50)  # Maximum number of articles to retrieve
+    MAXIMUM_ITEM_COUNT: int = Field(default=20)  # Maximum number of articles to retrieve
     DAYS_TO_CHECK: int = Field(default=14)
 
     @property

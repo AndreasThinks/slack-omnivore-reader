@@ -43,14 +43,29 @@ pico_css = Style('''
         border-radius: 0.5rem;
         padding: 1rem;
         background-color: var(--card-background);
-        cursor: move;
         transition: all 0.3s ease;
+    }
+    .card-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    .drag-handle {
+        cursor: move;
+        padding: 0.25rem;
+        color: #6B7280;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+    }
+    .drag-handle::before {
+        content: "☰";
+        font-size: 1.2em;
     }
     .item-list {
         list-style: none !important;
         padding-left: 0 !important;
         margin-left: 0 !important;
-                 
     }
     .item-list li {
         list-style-type: none !important;
@@ -122,21 +137,22 @@ pico_css = Style('''
         text-decoration: none;
         border-radius: 0.5rem;
         font-size: 0.95rem;
+        font-weight: 500;
         transition: all 0.2s ease;
         border: none;
-        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     }
     .download-btn:hover {
         background-color: #4338CA;
         transform: translateY(-1px);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     .header-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 1.5rem;
-        padding: 0.5rem 0;
+        margin-bottom: 2rem;
+        padding: 0.75rem 0;
     }
     .last-updated {
         margin: 0;
@@ -163,7 +179,11 @@ class StoryCard:
 
         return Li(
             Article(
-                H3(A(self.title, href=self.url)),
+                Div(
+                    Div(cls="drag-handle"),
+                    H3(A(self.title, href=self.url), cls="card-title"),
+                    cls="card-header"
+                ),
                 P(self.long_summary, cls="long-summary"),
                 P(self.short_summary, cls="short-summary"),
                 Footer(A("Read more", href=self.url, cls="secondary read-more")),
