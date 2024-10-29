@@ -1,15 +1,16 @@
 from fasthtml import FastHTML
 from fasthtml.common import fast_app, Form, Head, Picture, SortableJS, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from limits import parse_many
 import pandas as pd
 from datetime import datetime, timedelta
+import os
 
-from summariser.newsletter_creator import update_items_from_articles, get_last_update_date, db, create_newsletter
+from summariser.newsletter_creator import get_last_update_date, db, create_newsletter
 from config import settings
 from slack_handlers import app as slack_app
 from utils import setup_rate_limiter, setup_logging
@@ -101,19 +102,45 @@ pico_css = Style('''
         margin-bottom: 2rem;
     }
     ul, ol {
-  list-style-type: none;
+        list-style-type: none;
     }
     .sortable {
-  list-style-type: none;
+        list-style-type: none;
     }
-  #header-image {
-    display: block;
-    margin-left: auto;
-    margin-right: auto;
-    max-width: 30%;
-    height: auto;
-  }            
-
+    #header-image {
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        max-width: 30%;
+        height: auto;
+    }
+    .download-btn {
+        display: inline-block;
+        padding: 0.5rem 1.2rem;
+        background-color: #4F46E5;
+        color: white;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+        border: none;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    }
+    .download-btn:hover {
+        background-color: #4338CA;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    .header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding: 0.5rem 0;
+    }
+    .last-updated {
+        margin: 0;
+    }
 ''')
 
 
@@ -146,7 +173,7 @@ class StoryCard:
         )
 
 
-app, rt = fast_app(hdrs=(picolink, pico_css, SortableJS('.sortable'),))
+app, rt = fast_app(hdrs=(picolink, pico_css, SortableJS('.sortable'),), htmlkw={'data-theme': 'light'})
 
 LONG_ITEM_COUNT = 3
 SHORT_ITEM_COUNT = 4
@@ -185,11 +212,18 @@ def home():
     latest_summary = newsletter_summaries(order_by='-date', limit=1)
     summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
 
+    # Add download button for newsletter
+    download_btn = A("Download Newsletter", href="/download-newsletter", cls="download-btn")
+
     page = (Title('Bedtime Reading'),
             Img(src=f"/header.png", id=f'header-image'),
         Main(
             Div(
-                    P(f"Last updated on: {last_update.strftime('%Y-%m-%d') if last_update else 'Never'}", cls="last-updated"),
+                    Div(
+                        P(f"Last updated on: {last_update.strftime('%Y-%m-%d') if last_update else 'Never'}", cls="last-updated"),
+                        download_btn,
+                        cls="header-row"
+                    ),
                     Div(summary_content, cls="newsletter-summary"),
                     card_container, 
                 cls="container"
@@ -198,6 +232,22 @@ def home():
     )
 
     return page
+
+@app.get("/download-newsletter")
+async def download_newsletter():
+    """Serve the newsletter HTML file for download."""
+    newsletter_path = "newsletter.html"
+    if not os.path.exists(newsletter_path):
+        # Generate a new newsletter if it doesn't exist
+        create_newsletter()
+    
+    if os.path.exists(newsletter_path):
+        return FileResponse(
+            path=newsletter_path,
+            filename=f"newsletter_{datetime.now().strftime('%Y-%m-%d')}.html",
+            media_type="text/html"
+        )
+    raise HTTPException(status_code=404, detail="Newsletter not found")
 
 @app.post("/update")
 async def update():
@@ -267,5 +317,4 @@ async def slack_events(req: Request):
         logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
     
-    6
 serve()

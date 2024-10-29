@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 import subprocess
 from fasthtml.common import database
 
+from config import settings
+
+minimum_item_count = settings.MINIMUM_ITEM_COUNT
+maximum_item_count = settings.MAXIMUM_ITEM_COUNT
+days_to_check = settings.DAYS_TO_CHECK
+
 load_dotenv()
 db = database('data/items.db')
 
@@ -32,7 +38,6 @@ def get_last_update_date():
 def set_last_update_date(date):
     last_update.insert({'update_date': date.strftime('%Y-%m-%d')})
 
-
 def update_items_from_csv():
     df = pd.read_csv('summariser/item_summaries.csv')
     current_date = datetime.now().date()
@@ -48,9 +53,14 @@ def update_items_from_csv():
         })
     set_last_update_date(current_date)
 
-def query_recent_omnivore_articles(days=14, limit=25):
+def query_recent_omnivore_articles(initial_days=None, limit=None):
     api_token = os.getenv("OMNIVORE_API_KEY")
     url = "https://api-prod.omnivore.app/api/graphql"
+    
+    if initial_days is None:
+        initial_days = days_to_check
+    if limit is None:
+        limit = maximum_item_count
     
     query = """
     query RecentArticles($after: String, $first: Int) {
@@ -77,7 +87,7 @@ def query_recent_omnivore_articles(days=14, limit=25):
     }
     """
     
-    variables = {"after": None, "first": limit}
+    variables = {"after": None, "first": limit * 2}  # Request more than needed to ensure we have enough after date filtering
     headers = {"Content-Type": "application/json", "Authorization": api_token}
     
     try:
@@ -85,18 +95,52 @@ def query_recent_omnivore_articles(days=14, limit=25):
         response.raise_for_status()
         data = response.json()
         
-        cutoff_date = datetime.now(pytz.utc) - timedelta(days=days)
-        recent_articles = [
+        cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+        
+        # Get all articles with their saved dates
+        articles = [
             {
                 "title": article['node']['title'],
                 "url": article['node']['url'],
-                "content": article['node']['content']
+                "content": article['node']['content'],
+                "saved_at": datetime.fromisoformat(article['node']['savedAt'].replace('Z', '+00:00'))
             }
             for article in data['data']['search']['edges']
-            if datetime.fromisoformat(article['node']['savedAt'].replace('Z', '+00:00')) > cutoff_date
         ]
         
-        return recent_articles
+        # Sort articles by date, newest first
+        articles.sort(key=lambda x: x['saved_at'], reverse=True)
+        
+        # First try to get articles within the initial days period
+        filtered_articles = [
+            article for article in articles
+            if article['saved_at'] > cutoff_date
+        ]
+        
+        # If we don't have enough articles, gradually increase the date range
+        while len(filtered_articles) < minimum_item_count and initial_days < 365:  # Cap at 1 year
+            initial_days += days_to_check
+            cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+            filtered_articles = [
+                article for article in articles
+                if article['saved_at'] > cutoff_date
+            ]
+            
+            # If we've gone through all available articles and still don't have enough,
+            # just return what we have
+            if len(filtered_articles) == len(articles):
+                break
+        
+        # Limit to maximum_item_count while keeping the most recent articles
+        filtered_articles = filtered_articles[:maximum_item_count]
+        
+        # Convert back to the expected format
+        return [{
+            "title": article['title'],
+            "url": article['url'],
+            "content": article['content']
+        } for article in filtered_articles]
+        
     except requests.RequestException as e:
         print(f"Error querying Omnivore API: {e}")
         return []
@@ -179,7 +223,6 @@ def generate_article_summary(title, url, content, num_comparisons=4):
     print('found comparisons')
 
     comparison_intro = "Here are some examples of article comparisons to guide your interest scoring:\n" if comparison_examples else ""
-
 
     prompt = f"""
     Analyze the following article and provide a summary in JSON format:
@@ -275,7 +318,6 @@ def generate_markdown_newsletter(num_long_summaries, num_short_summaries):
     
     return markdown_content
 
-
 def create_quarto_document(summary, content):
     with open('newsletter_template.qmd', 'r') as f:
         template = f.read()
@@ -335,11 +377,4 @@ if __name__ == "__main__":
         comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
         last_update.create(id=int, update_date=str, pk='id')
         newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
-    create_newsletter()
-
-if items not in db.t:
-    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
-    comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
-    last_update.create(id=int, update_date=str, pk='id')
-    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
     create_newsletter()
