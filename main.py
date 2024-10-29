@@ -1,5 +1,5 @@
 from fasthtml import FastHTML
-from fasthtml.common import fast_app, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
+from fasthtml.common import fast_app, NotStr, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -49,24 +49,54 @@ pico_css = Style('''
         display: flex;
         align-items: center;
         gap: 1rem;
+        min-height: 48px;
     }
     .vote-buttons {
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
         margin-right: 1rem;
+        flex-shrink: 0;
+        height: 100%;
+        justify-content: center;
     }
     .vote-button {
         cursor: pointer;
         padding: 0.25rem;
-        color: #6B7280;
+        color: #9CA3AF;
         background: none;
         border: none;
-        font-size: 1.2em;
         text-decoration: none;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: all 0.2s ease;
     }
     .vote-button:hover {
-        color: #4B5563;
+        color: #4F46E5;
+        background: #EEF2FF;
+    }
+    .vote-button svg {
+        width: 16px;
+        height: 16px;
+    }
+    .card-title {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        flex: 1;
+        line-height: 1.2;
+    }
+    .card-title h3 {
+        margin: 0;
+    }
+    .card-title a {
+        display: inline-flex;
+        align-items: center;
     }
     .item-list {
         list-style: none !important;
@@ -188,12 +218,21 @@ class StoryCard:
         else:  # link format
             base_class += " link-item"
 
+        # SVG icons for vote buttons
+        up_arrow = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832 6.29 12.77a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z" clip-rule="evenodd" />
+        </svg>'''
+        
+        down_arrow = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+        </svg>'''
+
         return Li(
             Article(
                 Div(
                     Div(
-                        A("⬆️", href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/up", hx_target="#story-container", hx_swap="innerHTML"),
-                        A("⬇️", href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/down", hx_target="#story-container", hx_swap="innerHTML"),
+                        A(NotStr(up_arrow), href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/up", hx_target="#story-container", hx_swap="innerHTML"),
+                        A(NotStr(down_arrow), href="#", cls="vote-button", hx_post=f"/vote/{self.item_id}/down", hx_target="#story-container", hx_swap="innerHTML"),
                         cls="vote-buttons"
                     ),
                     H3(A(self.title, href=self.url), cls="card-title"),
@@ -291,11 +330,11 @@ async def update():
 @app.post("/vote/{id}/{direction}")
 async def vote(id: int, direction: str):
     try:
-        # Get current item from database directly
+        # Get current item's score
         current_item = items[id]
         current_score = current_item.get('interest_score', 0)
         
-        # Get sorted list of items
+        # Get fresh list of sorted items
         df = pd.DataFrame(items())
         df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
         
@@ -307,30 +346,31 @@ async def vote(id: int, direction: str):
         
         # Ensure new index is within bounds
         if 0 <= new_idx < len(df_sorted):
-            # Get the item we're swapping with
-            swap_id = int(df_sorted.iloc[new_idx]['id'])
-            swap_item = items[swap_id]
-            swap_score = swap_item.get('interest_score', 0)
+            # Get the item we're comparing with
+            target_item = df_sorted.iloc[new_idx]
+            target_score = target_item['interest_score']
             
-            # Record the comparison based on vote direction
             if direction == "up":
-                # Voting up means current item wins over the one above it
+                # Set score just slightly higher than the item above
+                new_score = target_score + 0.1
+                
+                # Record the comparison
                 comparisons.insert({
-                    'winning_id': id,
-                    'losing_id': swap_id
+                    'winning_id': int(id),
+                    'losing_id': int(target_item['id'])
                 })
-                # Update interest scores
-                items.update({'interest_score': current_score + 1}, id)
-                items.update({'interest_score': swap_score - 1}, swap_id)
             else:
-                # Voting down means item below wins over current item
+                # Set score just slightly lower than the item below
+                new_score = target_score - 0.1
+                
+                # Record the comparison
                 comparisons.insert({
-                    'winning_id': swap_id,
-                    'losing_id': id
+                    'winning_id': int(target_item['id']),
+                    'losing_id': int(id)
                 })
-                # Update interest scores
-                items.update({'interest_score': current_score - 1}, id)
-                items.update({'interest_score': swap_score + 1}, swap_id)
+            
+            # Update the score
+            items.update({'interest_score': new_score}, id)
         
         # Re-fetch and sort items
         df = pd.DataFrame(items())
