@@ -40,6 +40,14 @@ def get_last_update_date():
 def set_last_update_date(date):
     last_update.insert({'update_date': date.strftime('%Y-%m-%d')})
 
+def get_existing_urls():
+    """Get a set of all URLs currently in the database."""
+    try:
+        df = pd.DataFrame(items())
+        return set(df['url'].values)
+    except (KeyError, ValueError):
+        return set()
+
 def update_items_from_csv():
     df = pd.read_csv('summariser/item_summaries.csv')
     current_date = datetime.now().date()
@@ -90,18 +98,20 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
     }
     """
     
-    # Request more than needed to ensure we have enough after filtering
-    variables = {"after": None, "first": maximum_item_count * 2}
+    variables = {"after": None, "first": limit * 2}  # Request more than needed to ensure we have enough after filtering
     headers = {"Content-Type": "application/json", "Authorization": api_token}
     
     try:
+        # Get existing URLs to avoid duplicates
+        existing_urls = get_existing_urls()
+        
         response = requests.post(url, json={"query": query, "variables": variables}, headers=headers)
         response.raise_for_status()
         data = response.json()
         
         cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
         
-        # Get all articles with their saved dates
+        # Get all articles with their saved dates, excluding ones we already have
         articles = [
             {
                 "title": article['node']['title'],
@@ -110,7 +120,12 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                 "saved_at": article['node']['savedAt']  # Keep the ISO format string
             }
             for article in data['data']['search']['edges']
+            if article['node']['url'] not in existing_urls
         ]
+        
+        if not articles:
+            print("No new articles found that aren't already in the database.")
+            return []
         
         # Sort articles by date, newest first
         articles.sort(key=lambda x: x['saved_at'], reverse=True)
@@ -139,7 +154,8 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                 response.raise_for_status()
                 data = response.json()
                 
-                articles = [
+                # Get new articles, still excluding ones we already have
+                new_articles = [
                     {
                         "title": article['node']['title'],
                         "url": article['node']['url'],
@@ -147,7 +163,13 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                         "saved_at": article['node']['savedAt']
                     }
                     for article in data['data']['search']['edges']
+                    if article['node']['url'] not in existing_urls
                 ]
+                
+                if not new_articles:
+                    break
+                
+                articles.extend(new_articles)
                 articles.sort(key=lambda x: x['saved_at'], reverse=True)
                 
                 filtered_articles = [
@@ -155,15 +177,14 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                     if datetime.fromisoformat(article['saved_at'].replace('Z', '+00:00')) > cutoff_date
                 ]
         
-        # If we still don't have enough articles after reaching maximum_days_to_check,
-        # just take the most recent ones we have
+        # If we still don't have enough new articles after reaching maximum_days_to_check,
+        # just take what we have
         if len(filtered_articles) < minimum_item_count:
-            filtered_articles = articles[:minimum_item_count]
+            print(f"Warning: Only found {len(filtered_articles)} new articles")
+            return filtered_articles
         
         # Limit to maximum_item_count while keeping the most recent articles
-        filtered_articles = filtered_articles[:maximum_item_count]
-        
-        return filtered_articles
+        return filtered_articles[:maximum_item_count]
         
     except requests.RequestException as e:
         print(f"Error querying Omnivore API: {e}")
@@ -297,6 +318,10 @@ def generate_article_summary(title, url, content, num_comparisons=4):
 
 def process_articles():
     articles = query_recent_omnivore_articles()
+    if not articles:
+        print("No new articles to process")
+        return []
+        
     processed_data = []
     
     for article in tqdm(articles, desc="Processing articles"):
@@ -316,6 +341,10 @@ def process_articles():
     return processed_data
 
 def update_items_from_articles(articles):
+    if not articles:
+        print("No new articles to update in database")
+        return
+        
     current_date = datetime.now().date()
     for article in articles:
         items.upsert({
@@ -397,18 +426,27 @@ def create_newsletter(num_long_summaries=None, num_short_summaries=None):
     try:
         df = pd.DataFrame(items())
         df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        
+        # Check if we have enough articles
+        if len(df_sorted) >= minimum_item_count:
+            print("Using existing articles from database...")
+        else:
+            print("Not enough articles in database, fetching new ones...")
+            articles = process_articles()
+            if articles:
+                update_items_from_articles(articles)
+            
     except KeyError:
         print("No items found in the database")
         articles = process_articles()
-        update_items_from_articles(articles)
+        if articles:
+            update_items_from_articles(articles)
 
-    if not last_update or (current_date - last_update) >= timedelta(days=14):
-        print('time for DB update)')
+    if not last_update or (current_date - last_update) >= timedelta(days=maximum_days_to_check):
         print("Fetching and processing new articles...")
         articles = process_articles()
-        update_items_from_articles(articles)
-    else:
-        print("Using existing articles from database...")
+        if articles:
+            update_items_from_articles(articles)
 
     newsletter_content = generate_markdown_newsletter(num_long_summaries, num_short_summaries)
     
@@ -426,3 +464,4 @@ if __name__ == "__main__":
         comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
         last_update.create(id=int, update_date=str, pk='id')
         newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
+    create_newsletter()

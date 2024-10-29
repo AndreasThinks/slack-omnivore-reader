@@ -315,7 +315,7 @@ def home():
 
     item_cards = []
     for i, row in df_sorted.iterrows():
-        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['saved_at'])
         format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
         item_cards.append(card.render(format_type))
 
@@ -370,7 +370,7 @@ async def refresh_articles():
         
         item_cards = []
         for i, row in df_sorted.iterrows():
-            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['saved_at'])
             format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
             item_cards.append(card.render(format_type))
         
@@ -452,7 +452,7 @@ async def vote(id: int, direction: str):
         # Render updated list
         item_cards = []
         for i, row in df_sorted.iterrows():
-            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['added_date'])
+            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['saved_at'])
             format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
             item_cards.append(card.render(format_type))
         
