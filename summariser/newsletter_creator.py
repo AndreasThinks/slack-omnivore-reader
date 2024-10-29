@@ -11,6 +11,13 @@ from dotenv import load_dotenv
 import subprocess
 from fasthtml.common import database
 
+from config import settings
+
+minimum_item_count = settings.MINIMUM_ITEM_COUNT
+maximum_item_count = settings.MAXIMUM_ITEM_COUNT
+days_to_check = settings.DAYS_TO_CHECK
+EXAMPLE_SCORES_COUNT = 5  # Number of recent scores to include as examples
+
 load_dotenv()
 db = database('data/items.db')
 
@@ -32,7 +39,6 @@ def get_last_update_date():
 def set_last_update_date(date):
     last_update.insert({'update_date': date.strftime('%Y-%m-%d')})
 
-
 def update_items_from_csv():
     df = pd.read_csv('summariser/item_summaries.csv')
     current_date = datetime.now().date()
@@ -48,9 +54,14 @@ def update_items_from_csv():
         })
     set_last_update_date(current_date)
 
-def query_recent_omnivore_articles(days=14, limit=25):
+def query_recent_omnivore_articles(initial_days=None, limit=None):
     api_token = os.getenv("OMNIVORE_API_KEY")
     url = "https://api-prod.omnivore.app/api/graphql"
+    
+    if initial_days is None:
+        initial_days = days_to_check
+    if limit is None:
+        limit = maximum_item_count
     
     query = """
     query RecentArticles($after: String, $first: Int) {
@@ -77,7 +88,7 @@ def query_recent_omnivore_articles(days=14, limit=25):
     }
     """
     
-    variables = {"after": None, "first": limit}
+    variables = {"after": None, "first": limit * 2}  # Request more than needed to ensure we have enough after date filtering
     headers = {"Content-Type": "application/json", "Authorization": api_token}
     
     try:
@@ -85,18 +96,52 @@ def query_recent_omnivore_articles(days=14, limit=25):
         response.raise_for_status()
         data = response.json()
         
-        cutoff_date = datetime.now(pytz.utc) - timedelta(days=days)
-        recent_articles = [
+        cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+        
+        # Get all articles with their saved dates
+        articles = [
             {
                 "title": article['node']['title'],
                 "url": article['node']['url'],
-                "content": article['node']['content']
+                "content": article['node']['content'],
+                "saved_at": datetime.fromisoformat(article['node']['savedAt'].replace('Z', '+00:00'))
             }
             for article in data['data']['search']['edges']
-            if datetime.fromisoformat(article['node']['savedAt'].replace('Z', '+00:00')) > cutoff_date
         ]
         
-        return recent_articles
+        # Sort articles by date, newest first
+        articles.sort(key=lambda x: x['saved_at'], reverse=True)
+        
+        # First try to get articles within the initial days period
+        filtered_articles = [
+            article for article in articles
+            if article['saved_at'] > cutoff_date
+        ]
+        
+        # If we don't have enough articles, gradually increase the date range
+        while len(filtered_articles) < minimum_item_count and initial_days < 365:  # Cap at 1 year
+            initial_days += days_to_check
+            cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
+            filtered_articles = [
+                article for article in articles
+                if article['saved_at'] > cutoff_date
+            ]
+            
+            # If we've gone through all available articles and still don't have enough,
+            # just return what we have
+            if len(filtered_articles) == len(articles):
+                break
+        
+        # Limit to maximum_item_count while keeping the most recent articles
+        filtered_articles = filtered_articles[:maximum_item_count]
+        
+        # Convert back to the expected format
+        return [{
+            "title": article['title'],
+            "url": article['url'],
+            "content": article['content']
+        } for article in filtered_articles]
+        
     except requests.RequestException as e:
         print(f"Error querying Omnivore API: {e}")
         return []
@@ -127,7 +172,7 @@ def generate_newsletter_summary():
     1. Carefully read through the provided article information.
     2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
     3. Focus on information that would be most relevant and appealing to the newsletter's audience.
-    4. Condense the key points into a brief summary, keeping it between 4-7 lines long.
+    4. Condense the key points into a brief summary, keeping it between 7-10 lines long.
     5. Ensure your summary is factual while also sounding exciting and inspiring.
     6. Use language that engages the reader and encourages them to explore the full newsletter.
     7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
@@ -138,7 +183,7 @@ def generate_newsletter_summary():
     - Enthusiastic without being overly promotional
     - Informative and concise
 
-    Please provide your summary within <summary> tags. Remember to keep it between 3-5 lines long, focusing on the most notable and exciting elements of this week's newsletter.
+    Please provide your summary within <summary> tags. Remember to keep it between 7-10 lines long, focusing on the most notable and exciting elements of this week's newsletter.
     """
     
     try:
@@ -167,19 +212,26 @@ def generate_newsletter_summary():
 def generate_article_summary(title, url, content, num_comparisons=4):
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     
-    comparison_data = comparisons(order_by='-id', limit=num_comparisons)
-    print(comparison_data)
+    # Get recent article examples with their scores
+    try:
+        df = pd.DataFrame(items())
+        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        recent_examples = df_sorted.head(EXAMPLE_SCORES_COUNT)
+        example_text = "\n\nHere are some recent articles and their interest scores for reference:\n"
+        for _, example in recent_examples.iterrows():
+            example_text += f"\nTitle: {example['title']}\nScore: {example['interest_score']}\nSummary: {example['short_summary'][:100]}...\n"
+    except (KeyError, ValueError):
+        # If no examples are available, provide an empty string
+        example_text = ""
 
+    comparison_data = comparisons(order_by='-id', limit=num_comparisons)
     comparison_examples = ""
     if len(comparison_data) > 0:
+        comparison_examples += "\n\nHere are some examples of article comparisons:\n"
         for comparison in comparison_data:
             winning_item = items[comparison['winning_id']]
             losing_item = items[comparison['losing_id']]
-            comparison_examples += f"As an example, this article is better:\nTitle: {winning_item['title']}\n{winning_item['short_summary'][:100]}...\n\nThan this article:\nTitle: {losing_item['title']}\n{losing_item['short_summary'][:100]}...\n\n"
-    print('found comparisons')
-
-    comparison_intro = "Here are some examples of article comparisons to guide your interest scoring:\n" if comparison_examples else ""
-
+            comparison_examples += f"\nPreferred article:\nTitle: {winning_item['title']}\n{winning_item['short_summary'][:100]}...\n\nOver this article:\nTitle: {losing_item['title']}\n{losing_item['short_summary'][:100]}...\n"
 
     prompt = f"""
     Analyze the following article and provide a summary in JSON format:
@@ -188,22 +240,27 @@ def generate_article_summary(title, url, content, num_comparisons=4):
     URL: {url}
 
     Content:
-    {content[:1000]}  # Truncate content to avoid token limits
+    {content[:1500]}  # Increased content limit for better context
 
-    {comparison_intro}{comparison_examples}
-    Make sure your interest score is based on London based AI engineers, who are technically savvy, and want to focus on exciting AI developments.
+    {example_text}
+    {comparison_examples}
+
+    Make sure your interest score is based on London based AI engineers, who are technically savvy, and want to focus on exciting AI developments. The score should be consistent with the example scores provided.
+
+    For the summaries:
+    - The short_summary should be 2-3 sentences that capture the main points and key insights
+    - The long_summary should be 5-6 sentences that provide a comprehensive overview, including context, key findings, and implications
 
     Provide output in the following JSON format:
     {{
       "interest_score": [0-100],
-      "short_summary": "[One-sentence summary]",
-      "long_summary": "[2-3 sentence summary]"
+      "short_summary": "[2-3 sentence summary]",
+      "long_summary": "[5-6 sentence summary]"
     }}
     """
     
     try:
         print('Generating summary...')
-        print('Prompt:', prompt)
         message = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=1000,
@@ -250,7 +307,12 @@ def update_items_from_articles(articles):
     set_last_update_date(current_date)
     generate_newsletter_summary()
 
-def generate_markdown_newsletter(num_long_summaries, num_short_summaries):
+def generate_markdown_newsletter(num_long_summaries=None, num_short_summaries=None):
+    if num_long_summaries is None:
+        num_long_summaries = settings.NUMBER_OF_LONG_ARTICLES
+    if num_short_summaries is None:
+        num_short_summaries = settings.NUMBER_OF_SHORT_ARTICLES
+
     df = pd.DataFrame(items())
     df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
     
@@ -275,7 +337,6 @@ def generate_markdown_newsletter(num_long_summaries, num_short_summaries):
     
     return markdown_content
 
-
 def create_quarto_document(summary, content):
     with open('newsletter_template.qmd', 'r') as f:
         template = f.read()
@@ -299,7 +360,12 @@ def render_quarto_to_html():
     except subprocess.CalledProcessError as e:
         print(f"Error rendering Quarto document: {e}")
 
-def create_newsletter(num_long_summaries=4, num_short_summaries=6):
+def create_newsletter(num_long_summaries=None, num_short_summaries=None):
+    if num_long_summaries is None:
+        num_long_summaries = settings.NUMBER_OF_LONG_ARTICLES
+    if num_short_summaries is None:
+        num_short_summaries = settings.NUMBER_OF_SHORT_ARTICLES
+
     last_update = get_last_update_date()
     current_date = datetime.now().date()
 
@@ -335,11 +401,4 @@ if __name__ == "__main__":
         comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
         last_update.create(id=int, update_date=str, pk='id')
         newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
-    create_newsletter()
-
-if items not in db.t:
-    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, pk='id')
-    comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
-    last_update.create(id=int, update_date=str, pk='id')
-    newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
     create_newsletter()
