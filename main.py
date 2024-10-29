@@ -247,8 +247,12 @@ class StoryCard:
         self.long_summary = long_summary
         self.short_summary = short_summary
         self.item_id = item_id
-        # Parse ISO format date and format it nicely
-        dt = datetime.fromisoformat(saved_at.replace('Z', '+00:00'))
+        # Parse ISO format date and format it nicely, with fallback to current time
+        try:
+            dt = datetime.fromisoformat(saved_at.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            dt = datetime.now(pytz.UTC)
+            print(f"Warning: Invalid saved_at date for article {title}, using current time")
         self.saved_at = dt.strftime('%B %d, %Y at %I:%M %p')
 
     def render(self, format_type):

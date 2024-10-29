@@ -28,7 +28,7 @@ last_update = db.t.last_update
 newsletter_summaries = db.t.newsletter_summaries
 
 if items not in db.t:
-    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, added_date=str, saved_at=str, pk='id')
+    items.create(id=int, title=str, url=str, content=str, long_summary=str, short_summary=str, interest_score=float, saved_at=str, pk='id')
     comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
     last_update.create(id=int, update_date=str, pk='id')
     newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
@@ -50,7 +50,6 @@ def get_existing_urls():
 
 def update_items_from_csv():
     df = pd.read_csv('summariser/item_summaries.csv')
-    current_date = datetime.now().date()
     for _, row in df.iterrows():
         items.upsert({
             'id': row['id'],
@@ -59,10 +58,9 @@ def update_items_from_csv():
             'long_summary': row['long_summary'],
             'short_summary': row['short_summary'],
             'interest_score': row['interest_score'],
-            'added_date': current_date.strftime('%Y-%m-%d'),
-            'saved_at': current_date.strftime('%Y-%m-%d')  # Default for CSV imports
+            'saved_at': row.get('saved_at', datetime.now(pytz.utc).isoformat())  # Use provided saved_at or current time as fallback
         })
-    set_last_update_date(current_date)
+    set_last_update_date(datetime.now().date())
 
 def query_recent_omnivore_articles(initial_days=None, limit=None):
     api_token = os.getenv("OMNIVORE_API_KEY")
@@ -117,7 +115,7 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                 "title": article['node']['title'],
                 "url": article['node']['url'],
                 "content": article['node']['content'],
-                "saved_at": article['node']['savedAt']  # Keep the ISO format string
+                "saved_at": article['node']['savedAt']  # Keep the ISO format string from Omnivore
             }
             for article in data['data']['search']['edges']
             if article['node']['url'] not in existing_urls
@@ -160,7 +158,7 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
                         "title": article['node']['title'],
                         "url": article['node']['url'],
                         "content": article['node']['content'],
-                        "saved_at": article['node']['savedAt']
+                        "saved_at": article['node']['savedAt']  # Keep the ISO format string from Omnivore
                     }
                     for article in data['data']['search']['edges']
                     if article['node']['url'] not in existing_urls
@@ -189,69 +187,6 @@ def query_recent_omnivore_articles(initial_days=None, limit=None):
     except requests.RequestException as e:
         print(f"Error querying Omnivore API: {e}")
         return []
-
-def generate_newsletter_summary():
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    
-    # Query the database for relevant articles
-    df = pd.DataFrame(items())
-    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
-    
-    # Prepare the content for the summary
-    articles_content = ""
-    for _, article in df_sorted.iterrows():
-        articles_content += f"Title: {article['title']}\n"
-        articles_content += f"URL: {article['url']}\n"
-        articles_content += f"Summary: {article['long_summary']}\n\n"
-
-    prompt = f"""
-    You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
-    Here are the articles for this week's newsletter:
-    <articles>
-    {articles_content[:3000]}  # Truncate to avoid token limits
-    </articles>
-
-    To create an effective summary, please follow these steps:
-
-    1. Carefully read through the provided article information.
-    2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
-    3. Focus on information that would be most relevant and appealing to the newsletter's audience.
-    4. Condense the key points into a brief summary, keeping it between 7-10 lines long.
-    5. Ensure your summary is factual while also sounding exciting and inspiring.
-    6. Use language that engages the reader and encourages them to explore the full newsletter.
-    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
-    8. Make specific references to "this week" to emphasize the current nature of the information.
-
-    Your summary should be written in a tone that is:
-    - Professional yet approachable
-    - Enthusiastic without being overly promotional
-    - Informative and concise
-
-    Please provide your summary within <summary> tags. Remember to keep it between 7-10 lines long, focusing on the most notable and exciting elements of this week's newsletter.
-    """
-    
-    try:
-        message = client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=1000,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        summary = message.content[0].text
-        summary = summary.replace('<summary>', '').replace('</summary>', '').strip()
-        
-        # Save the summary to the database
-        current_date = datetime.now().date().strftime('%Y-%m-%d')
-        newsletter_summaries.insert({
-            'date': current_date,
-            'summary': summary
-        })
-        
-        print(f"Newsletter summary for {current_date} saved to the database.")
-        return summary
-    except Exception as e:
-        print(f"Error generating or saving newsletter summary: {e}")
-        return ""
     
 def generate_article_summary(title, url, content, num_comparisons=4):
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -316,6 +251,71 @@ def generate_article_summary(title, url, content, num_comparisons=4):
         print(f"Error generating summary for {title}: {e}")
         return None
 
+
+def generate_newsletter_summary():
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    
+    # Query the database for relevant articles
+    df = pd.DataFrame(items())
+    df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+    
+    # Prepare the content for the summary
+    articles_content = ""
+    for _, article in df_sorted.iterrows():
+        articles_content += f"Title: {article['title']}\n"
+        articles_content += f"URL: {article['url']}\n"
+        articles_content += f"Summary: {article['long_summary']}\n\n"
+
+    prompt = f"""
+    You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
+    Here are the articles for this week's newsletter:
+    <articles>
+    {articles_content[:3000]}  # Truncate to avoid token limits
+    </articles>
+
+    To create an effective summary, please follow these steps:
+
+    1. Carefully read through the provided article information.
+    2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
+    3. Focus on information that would be most relevant and appealing to the newsletter's audience.
+    4. Condense the key points into a brief summary, keeping it between 7-10 lines long.
+    5. Ensure your summary is factual while also sounding exciting and inspiring.
+    6. Use language that engages the reader and encourages them to explore the full newsletter.
+    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
+    8. Make specific references to "this week" to emphasize the current nature of the information.
+
+    Your summary should be written in a tone that is:
+    - Professional yet approachable
+    - Enthusiastic without being overly promotional
+    - Informative and concise
+
+    Please provide your summary within <summary> tags. Remember to keep it between 7-10 lines long, focusing on the most notable and exciting elements of this week's newsletter.
+    """
+    
+    try:
+        message = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1000,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        summary = message.content[0].text
+        summary = summary.replace('<summary>', '').replace('</summary>', '').strip()
+        
+        # Save the summary to the database
+        current_date = datetime.now().date().strftime('%Y-%m-%d')
+        newsletter_summaries.insert({
+            'date': current_date,
+            'summary': summary
+        })
+        
+        print(f"Newsletter summary for {current_date} saved to the database.")
+        return summary
+    except Exception as e:
+        print(f"Error generating or saving newsletter summary: {e}")
+        return ""
+
+
 def process_articles():
     articles = query_recent_omnivore_articles()
     if not articles:
@@ -334,8 +334,7 @@ def process_articles():
                 'interest_score': summary['interest_score'],
                 'short_summary': summary['short_summary'],
                 'long_summary': summary['long_summary'],
-                'added_date': datetime.now().strftime('%Y-%m-%d'),
-                'saved_at': article['saved_at']
+                'saved_at': article['saved_at']  # Use the original savedAt from Omnivore
             })
     
     return processed_data
@@ -345,7 +344,6 @@ def update_items_from_articles(articles):
         print("No new articles to update in database")
         return
         
-    current_date = datetime.now().date()
     for article in articles:
         items.upsert({
             'id': hash(article['url']),  # Use a hash of the URL as a unique identifier
@@ -355,11 +353,11 @@ def update_items_from_articles(articles):
             'long_summary': article['long_summary'],
             'short_summary': article['short_summary'],
             'interest_score': article['interest_score'],
-            'added_date': current_date.strftime('%Y-%m-%d'),
-            'saved_at': article['saved_at']
+            'saved_at': article['saved_at']  # Use the original savedAt from Omnivore
         })
-    set_last_update_date(current_date)
+    set_last_update_date(datetime.now().date())
     generate_newsletter_summary()
+
 
 def generate_markdown_newsletter(num_long_summaries=None, num_short_summaries=None):
     if num_long_summaries is None:
