@@ -36,7 +36,6 @@ pico_css = Style('''
         --card-border-color: #d1d5db;
         --card-background: #f9fafb;
     }
-                 
     .item-card {
         margin-bottom: 1rem;
         border: 1px solid var(--card-border-color);
@@ -47,18 +46,17 @@ pico_css = Style('''
     }
     .card-header {
         display: flex;
-        align-items: center;
+        align-items: center;  /* This was already correct */
         gap: 1rem;
-        min-height: 48px;
     }
     .vote-buttons {
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
         margin-right: 1rem;
-        flex-shrink: 0;
-        height: 100%;
-        justify-content: center;
+        /* Add height to match the typical height of the title */
+        min-height: 2.5rem;
+        justify-content: center;  /* Center the buttons vertically */
     }
     .vote-button {
         cursor: pointer;
@@ -84,12 +82,11 @@ pico_css = Style('''
         height: 16px;
     }
     .card-title {
-        margin: 0;
-        padding: 0;
+        margin: 0 !important;  /* Remove default margins */
         display: flex;
         align-items: center;
-        flex: 1;
-        line-height: 1.2;
+        min-height: 2.5rem;  /* Match height of vote buttons */
+        flex: 1;  /* Take remaining space */
     }
     .card-title h3 {
         margin: 0;
