@@ -9,6 +9,7 @@ from limits import parse_many
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import pytz
 
 from summariser.newsletter_creator import get_last_update_date, db, create_newsletter, process_articles, update_items_from_articles
 from config import settings
@@ -309,18 +310,58 @@ def home():
 
     try:
         df = pd.DataFrame(items())
-        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
+        
+        # Convert saved_at to datetime
+        df['saved_at'] = pd.to_datetime(df['saved_at'])
+        
+        # Calculate minimum required items
+        min_required = (
+            settings.NUMBER_OF_LONG_ARTICLES + 
+            settings.NUMBER_OF_SHORT_ARTICLES
+        )
+        
+        if len(df) < min_required:
+            # If we don't have enough items, sort purely by interest score
+            df_sorted = df.sort_values('interest_score', ascending=False)
+        else:
+            # Calculate a time decay factor (e.g., last 7 days get priority)
+            current_time = pd.Timestamp.now(tz='UTC')
+            df['days_old'] = (current_time - df['saved_at']).dt.total_seconds() / (24 * 3600)
+            
+            # Create a combined score that weighs both recency and interest
+            # Articles less than 7 days old get a boost
+            df['recency_boost'] = (df['days_old'] <= 7).astype(float) * 1000
+            
+            # Combined score considers both interest_score and recency
+            df['combined_score'] = df['interest_score'] + df['recency_boost']
+            
+            # Sort by combined score, then by saved_at for ties
+            df_sorted = df.sort_values(
+                ['combined_score', 'saved_at'], 
+                ascending=[False, False]
+            )
+        
+        df_sorted = df_sorted.reset_index(drop=True)
+        
     except KeyError:
         logger.error("No items found in the database")
         create_newsletter()
-        df_sorted = pd.DataFrame()
         df = pd.DataFrame(items())
         df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
 
     item_cards = []
     for i, row in df_sorted.iterrows():
-        card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['saved_at'])
-        format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
+        card = StoryCard(
+            row['title'], 
+            row['url'], 
+            row['long_summary'], 
+            row['short_summary'], 
+            row['id'], 
+            row['saved_at'].isoformat() if isinstance(row['saved_at'], pd.Timestamp) else row['saved_at']
+        )
+        format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else \
+                     "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else \
+                     "link"
         item_cards.append(card.render(format_type))
 
     card_container = Ul(*item_cards, id='story-container')

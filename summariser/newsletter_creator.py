@@ -103,7 +103,10 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
             # Process articles from current page
             for article in data['results']:
                 # Only include articles with our tag and exclude highlights
-                if (settings.DOCUMENT_TAG in article.get('tags', []) and 
+                tags = article.get('tags', [])
+                if tags is None:
+                    tags = []
+                if (settings.DOCUMENT_TAG in tags and 
                     article['url'] not in existing_urls and 
                     article.get('category') != 'highlight'):
                     articles.append({
@@ -136,8 +139,10 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
             data = response.json()
             
             for article in data['results']:
+                if tags is None:
+                    tags = []
                 # Only include articles with our tag and exclude highlights
-                if (settings.DOCUMENT_TAG in article.get('tags', []) and 
+                if (settings.DOCUMENT_TAG in tags and 
                     article['url'] not in existing_urls and 
                     article.get('category') != 'highlight'):
                     articles.append({
