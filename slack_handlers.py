@@ -39,8 +39,11 @@ app = AsyncApp(
 trigger_emojis = get_trigger_emojis()
 deduplicator = EventDeduplicator()
 
-async def save_url_to_readwise(url: str) -> bool:
-    """Save a URL to Readwise Reader with the configured tag."""
+async def save_url_to_readwise(url: str) -> tuple[bool, str]:
+    """
+    Save a URL to Readwise Reader with the configured tag.
+    Returns (success, message) tuple.
+    """
     try:
         response = requests.post(
             "https://readwise.io/api/v3/save/",
@@ -51,30 +54,70 @@ async def save_url_to_readwise(url: str) -> bool:
             json={
                 "url": url,
                 "tags": [settings.DOCUMENT_TAG],
-                "location": "new"  # Save to "new" items
+                "location": "new",  # Save to "new" items
+                "saved_using": "slack-readwise-integration"  # Identify our app
             }
         )
-        response.raise_for_status()
-        return True
+        
+        # Check response status
+        if response.status_code == 201:
+            data = response.json()
+            reader_url = data.get('url', url)
+            return True, reader_url
+        elif response.status_code == 200:
+            # Document already exists
+            data = response.json()
+            reader_url = data.get('url', url)
+            return False, f"Document already exists at {reader_url}"
+        else:
+            response.raise_for_status()
+            return False, "Unknown error occurred"
+            
     except requests.RequestException as e:
         logger.error(f"Error saving URL to Readwise: {str(e)}")
-        return False
+        return False, str(e)
 
 async def check_url_exists(url: str) -> bool:
     """Check if a URL already exists in Readwise Reader."""
     try:
-        response = requests.get(
-            "https://readwise.io/api/v3/list/",
-            headers={
-                "Authorization": f"Token {settings.READWISE_API_KEY}"
-            },
-            params={
-                "url": url
+        # Normalize the URL for comparison
+        normalized_url = url.rstrip('/')
+        
+        # Initialize pagination
+        next_cursor = None
+        while True:
+            params = {
+                'source_url': normalized_url,  # Use source_url parameter for filtering
+                'category': 'article'  # Only look for articles, not highlights
             }
-        )
-        response.raise_for_status()
-        data = response.json()
-        return len(data.get("results", [])) > 0
+            if next_cursor:
+                params['pageCursor'] = next_cursor
+                
+            response = requests.get(
+                "https://readwise.io/api/v3/list/",
+                headers={
+                    "Authorization": f"Token {settings.READWISE_API_KEY}"
+                },
+                params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check results
+            for article in data.get('results', []):
+                article_url = article.get('source_url', '').rstrip('/')
+                if article_url == normalized_url:
+                    logger.info(f"Found exact URL match: {url}")
+                    return True
+            
+            # Check if there are more pages
+            next_cursor = data.get('nextPageCursor')
+            if not next_cursor:
+                break
+        
+        logger.info(f"No exact URL match found for: {url}")
+        return False
+        
     except requests.RequestException as e:
         logger.error(f"Error checking URL in Readwise: {str(e)}")
         return False
@@ -104,15 +147,16 @@ async def handle_reaction(event, say, client):
                     # No message is posted to Slack for duplicate URLs
                 else:
                     # If the URL doesn't exist, save it
-                    if await save_url_to_readwise(url):
-                        reply_text = f"Saved URL to Readwise Reader with tag '{settings.DOCUMENT_TAG}': {url}"
+                    success, result = await save_url_to_readwise(url)
+                    if success:
+                        reply_text = f"Saved URL to Readwise Reader with tag '{settings.DOCUMENT_TAG}': {result}"
                         await client.chat_postMessage(
                             channel=channel_id,
                             text=reply_text,
                             thread_ts=message_ts
                         )
                     else:
-                        logger.error(f"Failed to save URL to Readwise: {url}")
+                        logger.error(f"Failed to save URL to Readwise: {result}")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
