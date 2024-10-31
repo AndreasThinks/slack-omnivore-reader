@@ -10,6 +10,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 import pytz
+import json
 
 from summariser.newsletter_creator import get_last_update_date, db, create_newsletter, process_articles, update_items_from_articles
 from config import settings
@@ -238,6 +239,13 @@ pico_css = Style('''
             transform: translateY(-50%) rotate(360deg);
         }
     }
+    .progress-update {
+        margin-top: 1rem;
+        padding: 1rem;
+        background-color: #f3f4f6;
+        border-radius: 0.5rem;
+        border-left: 4px solid #10B981;
+    }
 ''')
 
 
@@ -373,12 +381,11 @@ def home():
     # Add download button for newsletter and refresh button
     buttons = Div(
         A("Download Newsletter", href="/download-newsletter", cls="action-btn download-btn"),
-        Button("Refresh Articles", 
+        Button("Fetch New Articles", 
                cls="action-btn refresh-btn",
-               hx_post="/refresh",
-               hx_target="#story-container",
-               hx_swap="innerHTML",
-               hx_indicator=".refresh-btn"),
+               hx_post="/refresh-start",
+               hx_target="#refresh-progress",
+               hx_swap="innerHTML"),
         style="display: flex; align-items: center;"
     )
 
@@ -392,6 +399,7 @@ def home():
                         cls="header-row"
                     ),
                     Div(summary_content, cls="newsletter-summary"),
+                    Div(id="refresh-progress"),
                     card_container, 
                 cls="container"
             )
@@ -400,29 +408,135 @@ def home():
 
     return page
 
-@app.post("/refresh")
-async def refresh_articles():
-    """Force a refresh of articles and their scores."""
+@app.post("/refresh-start")
+async def refresh_start():
+    """Start the refresh process and show initial progress."""
+    return Div(
+        P("Starting refresh process...", cls="progress-update"),
+        hx_post="/refresh-process-articles",
+        hx_trigger="load",
+        hx_target="#refresh-progress",
+        hx_swap="innerHTML"
+    )
+
+@app.post("/refresh-process-articles")
+async def refresh_process_articles():
+    """Process articles and show progress."""
     try:
-        logger.info("Starting manual refresh of articles...")
         articles = process_articles()
-        update_items_from_articles(articles)
-        logger.info("Manual refresh completed successfully")
+        if not articles:
+            return (
+                Div(
+                    P("No new articles found. Newsletter remains unchanged.", cls="progress-update"),
+                ),
+                # Add an empty div with out-of-band swap to clear the progress after delay
+                Div(
+                    "",
+                    id="refresh-progress",
+                    hx_swap_oob="true",
+                    hx_trigger="wait 2s"
+                )
+            )
         
-        # Return just the updated story container content
-        df = pd.DataFrame(items())
-        df_sorted = df.sort_values('interest_score', ascending=False).reset_index(drop=True)
-        
-        item_cards = []
-        for i, row in df_sorted.iterrows():
-            card = StoryCard(row['title'], row['url'], row['long_summary'], row['short_summary'], row['id'], row['saved_at'])
-            format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
-            item_cards.append(card.render(format_type))
-        
-        return Ul(*item_cards, id='story-container')
+        return Div(
+            P(f"Found {len(articles)} articles. Updating database...", cls="progress-update"),
+            Hidden(id="articles-data", value=json.dumps(articles)),  # Store articles data
+            hx_post="/refresh-update-items",
+            hx_trigger="load",
+            hx_target="#refresh-progress",
+            hx_swap="innerHTML",
+        )
     except Exception as e:
-        logger.error(f"Error during manual refresh: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error refreshing articles")
+        logger.error(f"Error during article processing: {str(e)}", exc_info=True)
+        return Div(f"Error processing articles: {str(e)}", cls="progress-update error")
+
+@app.post("/refresh-update-items")
+async def refresh_update_items(request: Request):
+    """Update items and show progress."""
+    try:
+        form = await request.form()
+        articles_data = json.loads(form.get("articles-data", "[]"))
+        if not articles_data:
+            return (
+                Div(
+                    P("No new articles to update.", cls="progress-update"),
+                ),
+                # Add an empty div with out-of-band swap to clear the progress after delay
+                Div(
+                    "",
+                    id="refresh-progress",
+                    hx_swap_oob="true",
+                    hx_trigger="wait 2s"
+                )
+            )
+            
+        update_items_from_articles(articles_data)
+        return Div(
+            P("Database updated. Generating new newsletter...", cls="progress-update"),
+            hx_post="/refresh-create-newsletter",
+            hx_trigger="load",
+            hx_target="#refresh-progress",
+            hx_swap="innerHTML",
+        )
+    except Exception as e:
+        logger.error(f"Error during items update: {str(e)}", exc_info=True)
+        return Div(f"Error updating items: {str(e)}", cls="progress-update error")
+
+@app.post("/refresh-create-newsletter")
+async def refresh_create_newsletter():
+    """Create newsletter and complete refresh."""
+    try:
+        create_newsletter()
+        # Get the latest newsletter summary
+        latest_summary = newsletter_summaries(order_by='-date', limit=1)
+        summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
+        
+        # Return both the progress update and trigger a refresh of the summary
+        return (
+            # Empty div to clear the progress updates
+            Div(id="refresh-progress"),
+            # Update the newsletter summary
+            Div(
+                summary_content,
+                cls="newsletter-summary",
+                hx_swap_oob="true"
+            ),
+            # Update the article list
+            Ul(
+                *[card.render(format_type) for i, (card, format_type) in enumerate(get_sorted_cards())],
+                id="story-container",
+                hx_swap_oob="true"
+            )
+        )
+    except Exception as e:
+        logger.error(f"Error during newsletter creation: {str(e)}", exc_info=True)
+        return Div(f"Error creating newsletter: {str(e)}", cls="progress-update error")
+
+def get_sorted_cards():
+    """Helper function to get sorted cards with their format types."""
+    df = pd.DataFrame(items())
+    df['saved_at'] = pd.to_datetime(df['saved_at'])
+    current_time = pd.Timestamp.now(tz='UTC')
+    df['days_old'] = (current_time - df['saved_at']).dt.total_seconds() / (24 * 3600)
+    df['recency_boost'] = (df['days_old'] <= 7).astype(float) * 1000
+    df['combined_score'] = df['interest_score'] + df['recency_boost']
+    df_sorted = df.sort_values(['combined_score', 'saved_at'], ascending=[False, False]).reset_index(drop=True)
+    
+    cards = []
+    for i, row in df_sorted.iterrows():
+        card = StoryCard(
+            row['title'], 
+            row['url'], 
+            row['long_summary'], 
+            row['short_summary'], 
+            row['id'], 
+            row['saved_at'].isoformat() if isinstance(row['saved_at'], pd.Timestamp) else row['saved_at']
+        )
+        format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else \
+                     "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else \
+                     "link"
+        cards.append((card, format_type))
+    return cards
 
 @app.get("/download-newsletter")
 async def download_newsletter():
