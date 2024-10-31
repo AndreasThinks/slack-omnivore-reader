@@ -303,7 +303,7 @@ class StoryCard:
         )
 
 
-app, rt = fast_app(hdrs=(picolink, pico_css), htmlkw={'data-theme': 'light'})
+app, rt = fast_app(hdrs=(MarkdownJS(), picolink, pico_css), htmlkw={'data-theme': 'light'})
 
 @app.get("/")
 def home():
@@ -398,7 +398,7 @@ def home():
                         buttons,
                         cls="header-row"
                     ),
-                    Div(summary_content, cls="newsletter-summary"),
+                    Div(summary_content, cls="newsletter-summary marked"),
                     Div(id="refresh-progress"),
                     card_container, 
                 cls="container"

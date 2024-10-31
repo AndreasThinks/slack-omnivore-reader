@@ -253,6 +253,7 @@ def generate_newsletter_summary():
 
     prompt = f"""
     You are a skilled assistant tasked with creating an engaging summary for a newsletter. Your goal is to produce a concise, compelling summary that highlights the most noteworthy articles and exciting news from this week's newsletter content.
+    You should use bold Markdown formatting to highlight key stories you are discussing. 
     Here are the articles for this week's newsletter:
     <articles>
     {articles_content[:3000]}  # Truncate to avoid token limits
@@ -264,10 +265,11 @@ def generate_newsletter_summary():
     2. Identify the 3-5 most important and interesting articles based on their summaries and titles.
     3. Focus on information that would be most relevant and appealing to the newsletter's audience.
     4. Condense the key points into a brief summary, keeping it between 7-10 lines long.
-    5. Ensure your summary is factual while also sounding exciting and inspiring.
-    6. Use language that engages the reader and encourages them to explore the full newsletter.
-    7. Avoid using phrases like "In this newsletter" or "This edition covers" - instead, dive straight into the content.
-    8. Make specific references to "this week" to emphasize the current nature of the information.
+    5. For each of the key articles, ensure your bold Markdown formatting on the key words.  Only bold one section of the summary per article, with no more than 5 bold sections in total.
+    6. Ensure your summary is factual while also sounding exciting and inspiring.
+    7. Start with an opening that grabs the attention, and highlights key facts.
+    8. After this opening, provide a few more lines quickly addressing other stories of note from the newsletter. 
+
 
     Your summary should be written in a tone that is:
     - Professional yet approachable
@@ -279,7 +281,7 @@ def generate_newsletter_summary():
     
     try:
         message = client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-5-sonnet-latest",
             max_tokens=1000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
