@@ -46,6 +46,28 @@ pico_css = Style('''
         background-color: var(--card-background);
         transition: all 0.3s ease;
     }
+    .progress-update {
+                         margin-top: 1rem;
+                 padding: 1rem 1.2rem;
+                 background-color: var(--card-background);
+         border: 1px solid var(--card-border-color);
+         border-radius: 0.5rem;
+                 }
+    .progress-update.error {
+        background-color: #FEF2F2;
+        border-color: #FCA5A5;
+       color: #991B1B;
+     }
+                     .progress-update svg {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+     }
+                     .progress-update.success {
+        background-color: #F0FDF4;
+        border-color: #86EFAC;
+        color: #166534;
+     }
     .card-header {
         display: flex;
         align-items: center;  /* This was already correct */
@@ -239,13 +261,6 @@ pico_css = Style('''
             transform: translateY(-50%) rotate(360deg);
         }
     }
-    .progress-update {
-        margin-top: 1rem;
-        padding: 1rem;
-        background-color: #f3f4f6;
-        border-radius: 0.5rem;
-        border-left: 4px solid #10B981;
-    }
 ''')
 
 
@@ -307,16 +322,17 @@ app, rt = fast_app(hdrs=(MarkdownJS(), picolink, pico_css), htmlkw={'data-theme'
 
 @app.get("/")
 def home():
+    logger.info("Loading home page")
     last_update = get_last_update_date()
     current_date = datetime.now().date()
 
     if not last_update or (current_date - last_update) >= timedelta(days=7):
-        if current_date.weekday() == 4:  # 4 represents Friday (0 is Monday, 6 is Sunday)
-            print("Updating items from Omnivore...")
-            create_newsletter()
-            last_update = current_date
+        logger.info("Articles out of date, fetching new ones")
+        create_newsletter()
+        last_update = current_date
 
     try:
+        logger.debug("Fetching and sorting articles")
         df = pd.DataFrame(items())
         
         # Convert saved_at to datetime
@@ -329,9 +345,11 @@ def home():
         )
         
         if len(df) < min_required:
+            logger.info(f"Not enough items ({len(df)} < {min_required}), sorting by interest score only")
             # If we don't have enough items, sort purely by interest score
             df_sorted = df.sort_values('interest_score', ascending=False)
         else:
+            logger.debug("Calculating combined score based on recency and interest")
             # Calculate a time decay factor (e.g., last 7 days get priority)
             current_time = pd.Timestamp.now(tz='UTC')
             df['days_old'] = (current_time - df['saved_at']).dt.total_seconds() / (24 * 3600)
@@ -350,6 +368,7 @@ def home():
             )
         
         df_sorted = df_sorted.reset_index(drop=True)
+        logger.info(f"Successfully sorted {len(df_sorted)} articles")
         
     except KeyError:
         logger.error("No items found in the database")
@@ -383,7 +402,7 @@ def home():
         A("Download Newsletter", href="/download-newsletter", cls="action-btn download-btn"),
         Button("Fetch New Articles", 
                cls="action-btn refresh-btn",
-               hx_post="/refresh-start",
+               hx_post="/refresh",
                hx_target="#refresh-progress",
                hx_swap="innerHTML"),
         style="display: flex; align-items: center;"
@@ -408,160 +427,72 @@ def home():
 
     return page
 
-@app.post("/refresh-start")
-async def refresh_start():
-    """Start the refresh process and show initial progress."""
-    return Div(
-        P("Starting refresh process...", cls="progress-update"),
-        hx_post="/refresh-process-articles",
-        hx_trigger="load",
-        hx_target="#refresh-progress",
-        hx_swap="innerHTML"
-    )
-
-@app.post("/refresh-process-articles")
-async def refresh_process_articles():
-    """Process articles and show progress."""
+@app.post("/refresh")
+async def refresh():
+    """Process that shows progress and keeps final status visible."""
+    logger.info("Starting refresh process")
     try:
+        # Process articles
+        logger.info("Processing articles from Omnivore")
         articles = process_articles()
         if not articles:
-            return (
-                Div(
-                    P("No new articles found. Newsletter remains unchanged.", cls="progress-update"),
-                ),
-                # Add an empty div with out-of-band swap to clear the progress after delay
-                Div(
-                    "",
-                    id="refresh-progress",
-                    hx_swap_oob="true",
-                    hx_trigger="wait 2s"
-                )
+            logger.info("No new articles found")
+            return Div(
+                P("No new articles found.", cls="progress-update")
             )
         
-        return Div(
-            P(f"Found {len(articles)} articles. Updating database...", cls="progress-update"),
-            Hidden(id="articles-data", value=json.dumps(articles)),  # Store articles data
-            hx_post="/refresh-update-items",
-            hx_trigger="load",
-            hx_target="#refresh-progress",
-            hx_swap="innerHTML",
-        )
-    except Exception as e:
-        logger.error(f"Error during article processing: {str(e)}", exc_info=True)
-        return Div(f"Error processing articles: {str(e)}", cls="progress-update error")
-
-@app.post("/refresh-update-items")
-async def refresh_update_items(request: Request):
-    """Update items and show progress."""
-    try:
-        form = await request.form()
-        articles_data = json.loads(form.get("articles-data", "[]"))
-        if not articles_data:
-            return (
-                Div(
-                    P("No new articles to update.", cls="progress-update"),
-                ),
-                # Add an empty div with out-of-band swap to clear the progress after delay
-                Div(
-                    "",
-                    id="refresh-progress",
-                    hx_swap_oob="true",
-                    hx_trigger="wait 2s"
-                )
-            )
-            
-        update_items_from_articles(articles_data)
-        return Div(
-            P("Database updated. Generating new newsletter...", cls="progress-update"),
-            hx_post="/refresh-create-newsletter",
-            hx_trigger="load",
-            hx_target="#refresh-progress",
-            hx_swap="innerHTML",
-        )
-    except Exception as e:
-        logger.error(f"Error during items update: {str(e)}", exc_info=True)
-        return Div(f"Error updating items: {str(e)}", cls="progress-update error")
-
-@app.post("/refresh-create-newsletter")
-async def refresh_create_newsletter():
-    """Create newsletter and complete refresh."""
-    try:
+        logger.info(f"Found {len(articles)} new articles")
+        
+        # Update database
+        logger.info("Updating database with new articles")
+        update_items_from_articles(articles)
+        
+        # Create new newsletter
+        logger.info("Generating new newsletter")
         create_newsletter()
-        # Get the latest newsletter summary
-        latest_summary = newsletter_summaries(order_by='-id', limit=1)
-        summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
         
-        # Return both the progress update and trigger a refresh of the summary
-        return (
-            # Empty div to clear the progress updates
-            Div(id="refresh-progress"),
-            # Update the newsletter summary
-            Div(
-                summary_content,
-                cls="newsletter-summary",
-                hx_swap_oob="true"
-            ),
-            # Update the article list
-            Ul(
-                *[card.render(format_type) for i, (card, format_type) in enumerate(get_sorted_cards())],
-                id="story-container",
-                hx_swap_oob="true"
-            )
+        # Return success message with count
+        logger.info("Refresh complete")
+        return Div(
+            P(f"Found {len(articles)} new articles! Refresh the page to see them.", cls="progress-update")
         )
+        
     except Exception as e:
-        logger.error(f"Error during newsletter creation: {str(e)}", exc_info=True)
-        return Div(f"Error creating newsletter: {str(e)}", cls="progress-update error")
-
-def get_sorted_cards():
-    """Helper function to get sorted cards with their format types."""
-    df = pd.DataFrame(items())
-    df['saved_at'] = pd.to_datetime(df['saved_at'])
-    current_time = pd.Timestamp.now(tz='UTC')
-    df['days_old'] = (current_time - df['saved_at']).dt.total_seconds() / (24 * 3600)
-    df['recency_boost'] = (df['days_old'] <= 7).astype(float) * 1000
-    df['combined_score'] = df['interest_score'] + df['recency_boost']
-    df_sorted = df.sort_values(['combined_score', 'saved_at'], ascending=[False, False]).reset_index(drop=True)
-    
-    cards = []
-    for i, row in df_sorted.iterrows():
-        card = StoryCard(
-            row['title'], 
-            row['url'], 
-            row['long_summary'], 
-            row['short_summary'], 
-            row['id'], 
-            row['saved_at'].isoformat() if isinstance(row['saved_at'], pd.Timestamp) else row['saved_at']
+        logger.error(f"Error during refresh: {str(e)}", exc_info=True)
+        return Div(
+            P(f"Error during refresh: {str(e)}", cls="progress-update error")
         )
-        format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else \
-                     "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else \
-                     "link"
-        cards.append((card, format_type))
-    return cards
+
 
 @app.get("/download-newsletter")
 async def download_newsletter():
     """Serve the newsletter HTML file for download."""
+    logger.info("Handling newsletter download request")
     newsletter_path = "newsletter.html"
     if not os.path.exists(newsletter_path):
-        # Generate a new newsletter if it doesn't exist
+        logger.info("Newsletter file not found, generating new one")
         create_newsletter()
     
     if os.path.exists(newsletter_path):
+        logger.info("Serving newsletter file")
         return FileResponse(
             path=newsletter_path,
             filename=f"newsletter_{datetime.now().strftime('%Y-%m-%d')}.html",
             media_type="text/html"
         )
+    logger.error("Newsletter file not found even after attempted generation")
     raise HTTPException(status_code=404, detail="Newsletter not found")
 
 @app.post("/update")
 async def update():
     current_date = datetime.now().date()
+    logger.info(f"Updating last update date to {current_date}")
     last_update.update({'date': current_date})
 
 @app.post("/vote/{id}/{direction}")
 async def vote(id: int, direction: str):
     try:
+        logger.info(f"Processing vote: {direction} for item {id}")
         # Get current item's score
         current_item = items[id]
         current_score = current_item.get('interest_score', 0)
@@ -585,6 +516,7 @@ async def vote(id: int, direction: str):
             if direction == "up":
                 # Set score just slightly higher than the item above
                 new_score = target_score + 0.1
+                logger.debug(f"Upvoting item {id} to score {new_score}")
                 
                 # Record the comparison
                 comparisons.insert({
@@ -594,6 +526,7 @@ async def vote(id: int, direction: str):
             else:
                 # Set score just slightly lower than the item below
                 new_score = target_score - 0.1
+                logger.debug(f"Downvoting item {id} to score {new_score}")
                 
                 # Record the comparison
                 comparisons.insert({
@@ -615,6 +548,7 @@ async def vote(id: int, direction: str):
             format_type = "long" if i < settings.NUMBER_OF_LONG_ARTICLES else "short" if i < settings.NUMBER_OF_LONG_ARTICLES + settings.NUMBER_OF_SHORT_ARTICLES else "link"
             item_cards.append(card.render(format_type))
         
+        logger.info(f"Vote processed successfully for item {id}")
         return Ul(*item_cards, id='story-container')
     
     except Exception as e:

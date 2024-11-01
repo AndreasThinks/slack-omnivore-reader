@@ -235,7 +235,7 @@ def generate_article_summary(title, url, content, num_comparisons=4):
         message = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=1000,
-            temperature=0,
+            temperature=1.0,
             messages=[{"role": "user", "content": prompt}]
         )
         summary = json.loads(message.content[0].text)

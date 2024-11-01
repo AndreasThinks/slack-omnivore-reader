@@ -1,5 +1,5 @@
 ---
-title: "AI Newsletter"
+title: "Bedtime Reading Newsletter"
 date: "{{date}}"
 format:
   html:
