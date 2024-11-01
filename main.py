@@ -330,6 +330,8 @@ def home():
         logger.info("Articles out of date, fetching new ones")
         create_newsletter()
         last_update = current_date
+    else:
+        logger.info(f"Articles up to date, last updated on {last_update}")
 
     try:
         logger.debug("Fetching and sorting articles")

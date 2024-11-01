@@ -8,6 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from dotenv import load_dotenv
 import logging
+import re
 
 import subprocess
 from fasthtml.common import database
@@ -38,6 +39,30 @@ if items not in db.t:
     comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
     last_update.create(id=int, update_date=str, pk='id')
     newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
+
+def cleanup_invalid_articles():
+    """Remove any articles from the database that don't have valid summaries."""
+    logger.info("Checking for articles without valid summaries")
+    try:
+        df = pd.DataFrame(items())
+        invalid_articles = df[
+            (df['long_summary'].isna()) | 
+            (df['long_summary'] == '') |
+            (df['short_summary'].isna()) |
+            (df['short_summary'] == '') |
+            (df['interest_score'].isna())
+        ]
+        
+        if not invalid_articles.empty:
+            logger.warning(f"Found {len(invalid_articles)} articles without valid summaries - removing them")
+            for idx, article in invalid_articles.iterrows():
+                items.delete(id=article['id'])
+            logger.info("Cleanup complete")
+        else:
+            logger.info("No invalid articles found")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
 
 def get_last_update_date():
     result = last_update(order_by='-id', limit=1)
@@ -122,7 +147,8 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
                         "title": article['title'],
                         "url": article['url'],
                         "content": article.get('text', ''),
-                        "saved_at": article['saved_at']
+                        "saved_at": article['saved_at'],
+                        "api_summary": article.get('summary', '')  # Get the summary from the API
                     })
                     new_articles_found += 1
                     logger.debug(f"Found new article: {article['title']}")
@@ -158,7 +184,8 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
                         "title": article['title'],
                         "url": article['url'],
                         "content": article.get('text', ''),
-                        "saved_at": article['saved_at']
+                        "saved_at": article['saved_at'],
+                        "api_summary": article.get('summary', '')  # Get the summary from the API
                     })
                     new_articles_found += 1
                     logger.debug(f"Found new article: {article['title']}")
@@ -180,7 +207,24 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
         logger.error(f"Error querying Readwise API: {str(e)}")
         return []
 
-def generate_article_summary(title, url, content, num_comparisons=4):
+def extract_json_from_response(response_text):
+    """Extract JSON from Claude's response, handling various formats."""
+    # Try to find JSON-like structure using regex
+    json_match = re.search(r'\{[\s\S]*\}', response_text)
+    if json_match:
+        try:
+            # Clean up the extracted JSON string
+            json_str = json_match.group(0)
+            # Remove any markdown code block markers
+            json_str = re.sub(r'```json|```', '', json_str)
+            # Parse the cleaned JSON
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse extracted JSON: {json_str}")
+            return None
+    return None
+
+def generate_article_summary(title, url, content, api_summary="", num_comparisons=4):
     logger.info(f"Generating summary for article: {title}")
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     
@@ -204,11 +248,14 @@ def generate_article_summary(title, url, content, num_comparisons=4):
             losing_item = items[comparison['losing_id']]
             comparison_examples += f"\nPreferred article:\nTitle: {winning_item['title']}\n{winning_item['short_summary'][:100]}...\n\nOver this article:\nTitle: {losing_item['title']}\n{losing_item['short_summary'][:100]}...\n"
 
+    api_summary_text = f"\nAPI-provided summary:\n{api_summary}" if api_summary else ""
+
     prompt = f"""
-    Analyze the following article and provide a summary in JSON format:
+    Analyze the following article and provide a summary in JSON format. You must respond with ONLY valid JSON, no other text:
 
     Title: {title}
     URL: {url}
+    {api_summary_text}
 
     Content:
     {content[:1500]}
@@ -221,8 +268,9 @@ def generate_article_summary(title, url, content, num_comparisons=4):
     For the summaries:
     - The short_summary should be 2-3 sentences that capture the main points and key insights
     - The long_summary should be 5-6 sentences that provide a comprehensive overview, including context, key findings, and implications
+    - If an API summary is provided, use it to enhance your summary but ensure you maintain the required format and length
 
-    Provide output in the following JSON format:
+    Respond with ONLY the following JSON format, no other text:
     {{
       "interest_score": [0-100],
       "short_summary": "[2-3 sentence summary]",
@@ -238,7 +286,22 @@ def generate_article_summary(title, url, content, num_comparisons=4):
             temperature=1.0,
             messages=[{"role": "user", "content": prompt}]
         )
-        summary = json.loads(message.content[0].text)
+        
+        # Extract and parse JSON from response
+        response_text = message.content[0].text
+        summary = extract_json_from_response(response_text)
+        
+        if summary is None:
+            logger.error(f"Failed to parse JSON response for article: {title}")
+            logger.debug(f"Raw response: {response_text}")
+            return None
+            
+        # Validate required fields
+        required_fields = ['interest_score', 'short_summary', 'long_summary']
+        if not all(field in summary for field in required_fields):
+            logger.error(f"Missing required fields in summary for article: {title}")
+            return None
+            
         logger.info(f"Successfully generated summary for: {title}")
         return summary
     except Exception as e:
@@ -310,6 +373,10 @@ def generate_newsletter_summary():
 
 def process_articles():
     logger.info("Starting article processing")
+    
+    # First, clean up any invalid articles
+    cleanup_invalid_articles()
+    
     articles = query_recent_readwise_articles()
     if not articles:
         logger.info("No new articles to process")
@@ -319,8 +386,13 @@ def process_articles():
     logger.info(f"Processing {len(articles)} articles")
     
     for article in tqdm(articles, desc="Processing articles"):
-        summary = generate_article_summary(article['title'], article['url'], article['content'])
-        if summary:
+        summary = generate_article_summary(
+            article['title'], 
+            article['url'], 
+            article['content'],
+            article.get('api_summary', '')  # Pass the API summary if available
+        )
+        if summary:  # Only add articles with successful summaries
             processed_data.append({
                 'title': article['title'],
                 'url': article['url'],
@@ -330,6 +402,8 @@ def process_articles():
                 'long_summary': summary['long_summary'],
                 'saved_at': article['saved_at']
             })
+        else:
+            logger.warning(f"Failed to generate summary for article: {article['title']}")
     
     logger.info(f"Successfully processed {len(processed_data)} articles")
     return processed_data
