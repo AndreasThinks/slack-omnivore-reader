@@ -375,7 +375,7 @@ def home():
     card_container = Ul(*item_cards, id='story-container')
 
     # Get the latest newsletter summary
-    latest_summary = newsletter_summaries(order_by='-date', limit=1)
+    latest_summary = newsletter_summaries(order_by='-id', limit=1)
     summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
 
     # Add download button for newsletter and refresh button
@@ -488,7 +488,7 @@ async def refresh_create_newsletter():
     try:
         create_newsletter()
         # Get the latest newsletter summary
-        latest_summary = newsletter_summaries(order_by='-date', limit=1)
+        latest_summary = newsletter_summaries(order_by='-id', limit=1)
         summary_content = latest_summary[0]['summary'] if latest_summary else "No newsletter summary available."
         
         # Return both the progress update and trigger a refresh of the summary
